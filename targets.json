@@ -1,0 +1,40 @@
+{
+  "_note": "League-wide per-match averages, both teams combined, as published by the Premier League (Opta). Facts only; fit on one season, test on later ones.",
+  "fit_season": {
+    "season": "2023-24",
+    "values": {
+      "passes_per_match": 941.0,
+      "pass_accuracy_pct": 82.9,
+      "long_balls_per_match": 101.3,
+      "high_turnovers_per_match": 16.7
+    }
+  },
+  "test_seasons": [
+    {
+      "season": "2024-25",
+      "values": {
+        "passes_per_match": 893.5,
+        "pass_accuracy_pct": 83.7,
+        "long_balls_per_match": 93.4,
+        "high_turnovers_per_match": 14.6
+      }
+    },
+    {
+      "season": "2025-26 (first 50 matches)",
+      "values": {
+        "passes_per_match": 849.1,
+        "pass_accuracy_pct": 82.6,
+        "long_balls_per_match": 99.7,
+        "high_turnovers_per_match": 11.5
+      }
+    }
+  ],
+  "sources": [
+    "https://www.premierleague.com/en/news/4426039/opta-analyst-on-long-balls-long-throws-key-tactical-trends-spotted-in-2025-26-season",
+    "https://www.premierleague.com/en/news/4461793/what-are-the-biggest-trends-from-202526-so-far"
+  ],
+  "fit_extra": {
+    "final_third_share_pct": 33.8,
+    "_note": "Share of passes ending in the final third; only published for 2025-26 (after 11 matchweeks), so used for fitting and NOT counted as a test."
+  }
+}

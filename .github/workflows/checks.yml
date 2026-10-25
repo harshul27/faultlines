@@ -14,3 +14,5 @@ jobs:
         run: python check.py
       - name: Realism vs held-out real data
         run: python validate.py
+      - name: Web data and live SSE server
+        run: python check_web.py

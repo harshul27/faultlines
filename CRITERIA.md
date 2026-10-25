@@ -12,6 +12,7 @@ Every requirement from the challenge brief and the official rules, where it is m
 | (b) Interpret into stats, patterns, context | Rolling pass network, fragility per player, connectivity index, progression and completion per window, betweenness, clutch score (`network.py`) | `check.py`: hub detected in ≥ 80% of 20 matches; marking it cuts progression vs paired control matches |
 | (c) Explain why a moment matters | Fault-line explanation: what the team loses without a player; Foundry model constrained to computed facts (`explain.py`) | `check.py`: fact-check rejects invented numbers; templates are grounded |
 | (d) Render on screen, machine-readable and timed | Pitch overlay + timed overlay cues with match clock, priority, display time, anchor (`stream.py` `CUE_SCHEMA`) | `check.py`: every cue validates against the JSON Schema; cues ordered by clock; 5–40 cues/match |
+| Real-time delivery to viewers | `server.py`: shared match clock pushed per event over SSE; state of play for late joiners; `Last-Event-ID` resume; back-pressure. Web page (GitHub Pages) with Live and Deep-analysis tabs | `check_web.py`: hello → ordered event ids → snapshots; cues valid; reconnect resumes with no gap |
 | (e) Personalize: analyst vs casual, favourite club/player, language | Sidebar: follow either club, favourite player lens (passes, network share, clutch), Casual/Analyst, 7 languages | `check.py`: every mode × favourite × language renders; analyst ≠ casual |
 | Player identification / focus mode | Favourite-player highlight and lens | manual demo |
 | Narrative generation, explainability ("control vs chaos", pressure changes) | Network fracture cues, fault-line shifts, connectivity timeline | `check.py` cue tests |
@@ -25,7 +26,7 @@ Every requirement from the challenge brief and the official rules, where it is m
 | Technological implementation | 81/19 train/test split by time (4,940 / 1,190 real matches), regularisation tuned inside training years, 17/17 held-out checks, requirement self-checks, documented modules | Add CI (GitHub Actions running both checks) |
 | Agentic design & innovation | Grounded explainer with numeric fact-check | Foundry agent(s) not yet deployed: multi-agent booth is a stretch goal |
 | Real-world impact & applicability | Broadcast-ready cue schema; latency budget; fragility is a scouting/tactics metric clubs could use on real data | See roadmap in README |
-| User experience & presentation | Streamlit app with live playback, cue feed, pitch overlay | Record the < 2 min demo |
+| User experience & presentation | Public web page (live + deep analysis, mobile-friendly) and Streamlit app | Record the < 2 min demo |
 | Adherence to category | All five pipeline stages covered (table above) | — |
 
 ## Official rules (submission)

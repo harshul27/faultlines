@@ -16,6 +16,28 @@ challenge requirement is met and tested.
 | Render | Pitch overlay, live cue feed, timed broadcast cues validated against a JSON Schema | `app.py`, `stream.py` |
 | Personalize | Follow a club, a favourite player (with late-game clutch score), Casual/Analyst mode, 7 languages | `app.py` |
 
+## Web page (live + deep analysis)
+**https://harshul27.github.io/faultlines/**: a static page with two tabs:
+* **Live:** broadcast-style pitch network with the fault line ringed, ball trail, lower-third cue graphics, scorebug,
+  momentum sparklines and an event ticker. Follow either club, pick a favourite player, Casual or Analyst.
+* **Deep analysis:** network dependence heat strip (players × minutes), player profile with dependence over time,
+  pass map and passing partners, team connectivity, progression and ball security, analyst read, key moments.
+
+Architecture (modelled on live sports data distribution: provider feed → stream processor → pub/sub → clients):
+```
+match feed (generator) -> LiveEngine (stream processor) -> pub/sub -> SSE /live  -> browser (updates per event)
+static CDN: page + precomputed match timelines            -> replay mode + analysis (works without the server)
+```
+`server.py` runs one shared match clock and pushes every event over Server-Sent Events: late joiners get the state
+of play, reconnecting clients resume from `Last-Event-ID`, slow clients are dropped (back-pressure), and analytics run
+off the event loop. Scale-out path: Azure Web PubSub between processor and clients. Point the page at a hosted server
+by setting `web/config.js` (or `?live=<url>`).
+```bash
+python export.py                        # rebuild web/data/ replay timelines
+uvicorn server:app --port 8000          # live feed + page at http://127.0.0.1:8000
+python check_web.py                     # static data + live SSE protocol tests
+```
+
 ## Run
 ```bash
 pip install -r requirements.txt

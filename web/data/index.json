@@ -1,0 +1,23 @@
+[
+ {
+  "seed": 23,
+  "file": "data/match-23.json",
+  "home": "Northbridge FC",
+  "away": "Riverside Athletic",
+  "final": "2-0"
+ },
+ {
+  "seed": 7,
+  "file": "data/match-7.json",
+  "home": "Northbridge FC",
+  "away": "Riverside Athletic",
+  "final": "1-1"
+ },
+ {
+  "seed": 11,
+  "file": "data/match-11.json",
+  "home": "Northbridge FC",
+  "away": "Riverside Athletic",
+  "final": "1-1"
+ }
+]

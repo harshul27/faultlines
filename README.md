@@ -98,7 +98,7 @@ between them are kept in `reports/`; no pass bar was moved. Latest: **12 of 20 p
 | Flags (1.7 per team per check) and cues (3 per match) after calibrating thresholds on ordinary matches | 'Fading' detects a real decline (man-marking) but in ordinary play flagged players bounce back: read it as a dip |
 | Expected points added beats the old clutch points (rho 0.60 vs -0.02 with realised decisive contributions) | It does not track results (by design it weights moments, not dominance): use xG for dominance |
 | AI plan reader 100% of hard cases (negations, sheets, Spanish, opponent instructions); rules 76% | Fault lines: in simulation, teams re-route play after losing a player, so fragility measures dependence now, not certain damage. The what-if now says so; the injury/red-card study on real data decides it |
-| Agents on 26 coach questions: right tools 96%, 0 coaching-guard violations, 4% fallbacks, model-judged quality 5.0/5; asked twice, the same recommendation 6 of 6 (substitutions follow an auditable rule; flanks come from fixed matchups) | Asked twice, answers still differ in the supporting players they mention (overlap test 67%, bar 80%) |
+| Agents on 26 coach questions: right tools 96%, 0 coaching-guard violations, 4% fallbacks, model-judged quality 4.8/5. Substitutions follow an auditable rule and opponents' direct matchups are looked up, not guessed (the Reyes question now names the left-back 3 of 3) | Consistency is borderline: asked twice, 4-6 of 6 answers agree depending on the run and the measure (bar 80%); 6 questions are too few to settle it |
 
 The report ends with the real-data studies, fixed in advance, that would settle each open question.
 

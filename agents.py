@@ -458,6 +458,18 @@ def _gather_substitution(plan_team, named):
     return [decision] + out
 
 
+def _gather_matchups(plan_team, opponents):
+    """For each named opponent: our player(s) facing them (mirrored positions) and their assessment."""
+    other = "away" if plan_team == "home" else "home"
+    ours = {r: p for p, r in squad(plan_team).items()}
+    facts = [{"their_player": p, "their_role": r, "faced_by": [f"{ours[x]} ({x})" for x in FACES[r]]}
+             for p, r in squad(other).items() if p in opponents and r in FACES]
+    assessed = [assess_player(ours[x]) for p, r in squad(other).items() if p in opponents and r in FACES for x in FACES[r]]
+    _by("Orchestrator", len(assessed))
+    CTX.get()["outputs"].extend(facts)
+    return facts + assessed
+
+
 def _run_skipped_whatifs(issues):
     names = [m.group(1) for i in issues if (m := re.match(r"(.+) is a key player in the plan; call what_if_remove", i))]
     out = [what_if_remove(p) for p in names]
@@ -511,6 +523,12 @@ async def ask(question, events, minute, seed, language="English", history=(), pl
                    "\nThe first item is the rule-based recommendation: lead with recommended_substitution and its reasons from "
                    "the data, then any caveats. Do not pick a different player; if the coach asked about someone else, "
                    "answer that and mention the recommended option.")
+    opponents = [p for p in squad("away" if plan_team == "home" else "home")
+                 if re.search(rf"\b{re.escape(p.split()[-1])}\b", question, re.I)]
+    if opponents:  # who deals with an opponent is a fact of the line-ups, not a judgement call
+        faced = await asyncio.to_thread(_gather_matchups, plan_team, opponents)
+        prompt += (f"\nDirect-opponent data (who faces them on the pitch, and how they are doing): {json.dumps(faced)}"
+                   "\nLead with the direct opponent(s) given here; mention other helpers only after them.")
     answer = await _analyse(prompt, session)
     calls += 1
     issues = grounding.check(answer, *ctx["outputs"], question, str(minute)) + advice_issues(answer)

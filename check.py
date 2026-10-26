@@ -146,4 +146,6 @@ agents.CTX.get()["outputs"].clear()
 pick = agents._gather_substitution("home", [])[0]
 assert pick["recommended_substitution"] == agents._gather_substitution("home", [])[0]["recommended_substitution"] == HUB[1], \
     "substitution advice is a deterministic rule (demo: the man-marked, fading hub, whose removal costs under 10%)"
+agents.CTX.get()["outputs"].clear()
+assert agents._gather_matchups("home", ["Callum Reyes"])[0]["faced_by"] == ["Sami Okafor (LB)"], "who faces an opponent is a fact"
 print("validation fixes ok")

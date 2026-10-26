@@ -547,7 +547,12 @@ HISTORY = """## What changed between runs (no pass bar was changed)
     removal costs under 10% of teammates' connectivity); the analyst explains it.
   * The recommendation extractor took the first name in the sentence ("Given Pike's importance..., I recommend
     substituting Luca Ferrand" -> Pike): an error in the metric. Fix: names after the recommending verb first.
-* **Run 7** (this report): agents and AI plan reader rerun after those fixes (`--only-ai`); offline results carried over from run 4.
+* **Run 7** ([evaluation-run7.md](evaluation-run7.md), `--only-ai`): 12 of 20; same recommendation 6 of 6, tools 96%.
+  * The flank question passed here, but asked again on the live server it named our left winger instead of the
+    left-back facing Reyes: the matchups were in the prompt, yet the model still chose. Fix (same pattern as
+    substitutions): when a question names an opponent, the orchestrator looks up who faces them and assesses that
+    player before the analyst writes (`agents._gather_matchups`).
+* **Run 8** (this report): agents and AI plan reader rerun after that fix (`--only-ai`); offline results carried over from run 4.
 """
 
 REAL_DATA = """## Still needs real data (protocols, fixed in advance)

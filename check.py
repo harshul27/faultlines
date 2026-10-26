@@ -104,7 +104,9 @@ assert len(rows) == 11 and all(1 <= r["plan_fit"] <= 99 for r in rows.values())
 assert any(f.startswith("overloaded") for f in rows[HUB[1]]["flags"]) and rows[HUB[1]]["form"] == "fading", \
     "the hub carries more load than the plan intends, and fades once man-marked (60')"
 ex = gp.execution(ev, "home", 70, plan)
-assert len(ex["principles"]) == len(plan["principles"]) and 1 <= ex["overall_plan_execution"] <= 99
+n_duties = len({d["duty"] for d in plan["duties"].values() if d["metrics"]})
+assert len(ex["principles"]) == len(plan["principles"]) + n_duties and 1 <= ex["overall_plan_execution"] <= 99, "principles and duties scored"
+assert gp.execution(ev, "away", 70, gp.default_plan("away"))["principles"], "a plan of position duties is scored too"
 z = gp.zones(ev, "home", 70)
 raw = gp.raw_metrics(ev, "home", 0, 4200)
 assert sum(z["final_third_entries_by_channel"].values()) == sum(r["final_third"] for r in raw.values()), "zones agree with metrics"
@@ -121,3 +123,22 @@ for q, want in [("Who should I take off?", "substitution"), ("Is our press worki
                 ("Which flank should we attack?", "tactics")]:
     assert agents._rules(q)["intent"] == want, (q, agents._rules(q))
 print("game plan ok")
+
+# Validation fixes (see evaluate.py / reports/evaluation.md)
+from network import expected_points
+
+never = gp.normalise(gp.parse_rules("Do not press high. No long balls, build up through the middle. Never give it away cheaply.", "home"), "home")
+found = set().union(*(p["metrics"] for p in never["principles"]))
+assert "high_recoveries" not in found and "long_passes" not in found and {"completion"} <= found, "negations are respected"
+assert 1.5 < expected_points(0, 95, "home") < 1.7, "home side at kickoff ~1.6 expected points (Premier League ~1.6)"
+assert expected_points(4, 5, "home") - expected_points(3, 5, "home") < 0.01 < expected_points(0, 5, "home") - expected_points(-1, 5, "home"), \
+    "a late equaliser is worth far more than a fifth goal"
+paired = list(simulate(23, absent=("home", HUB[1], 3600), fork=(3600, 1)))
+assert [e for e in paired if e["t"] < 3600] == [e for e in ev if e["t"] < 3600], "paired experiments share the first hour"
+assert sum(e["t"] > 3610 and HUB[1] in (e["player"], e["recipient"]) for e in paired) == 0, "an absent player takes no part"
+agents.CTX.set({"events": [e for e in ev if e["t"] < 4200], "minute": 70, "seed": 23, "trace": [], "outputs": [],
+                "plans": {t: gp.default_plan(t) for t in TEAMS}, "plan_team": "home", "custom_plan": False})
+assert agents.advice_issues("I recommend taking off Luca Ferrand.") and agents.advice_issues("Substitute Tomas Varga."), "coaching guard"
+agents.what_if_remove("Ferrand")
+assert not agents.advice_issues("I recommend taking off Luca Ferrand."), "guard clears once the counterfactual was checked"
+print("validation fixes ok")

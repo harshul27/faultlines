@@ -165,6 +165,20 @@ def _rating(zs, w):
     return round(max(1, min(99, 50 + 15 * sum(w[k] * zs[k][0] for k in w) / sum(w.values()))))
 
 
+@lru_cache(maxsize=1)
+def role_share():
+    """Each position's normal share of a team's on-ball actions (involvement + shots + recoveries), from the norms:
+    a centre-back touching the ball less than a holding midfielder is normal, not 'bypassed'."""
+    nm = norms()
+    a = {r: sum(nm[GROUP_OF[r]][k][0] for k in ("involvement", "shots", "recoveries")) for r in GROUP_OF}
+    return {r: v / sum(a.values()) for r, v in a.items()}
+
+
+# Alert thresholds, calibrated on ordinary matches with a neutral plan (python evaluate.py --calibrate; seeds 7000+,
+# never used by the tests): each fires for about 3% of player-checks when nothing unusual is happening.
+OVERLOAD, BYPASS, FADE = 1.41, 0.56, 22
+
+
 def assess(events, team, minute, plan):
     """Every player of one team against the plan: plan fit (match and last 15), form, load vs plan, flags, evidence."""
     t, roles = minute * 60, squad(team)
@@ -172,20 +186,21 @@ def assess(events, team, minute, plan):
     before = raw_metrics(events, team, 0, t - 900) if minute >= 30 else None
     acts = {p: r["involvement"] + r["shots"] + r["recoveries"] for p, r in full.items()}
     rel = {p: plan["duties"].get(p, {}).get("relevance", 2 if roles[p] == "GK" else 3) for p in roles}
-    total_acts, total_rel = sum(acts.values()) or 1, sum(rel.values())
+    want = {p: role_share()[roles[p]] * rel[p] / 3 for p in roles}  # the position's normal share, scaled by the plan
+    total_acts, total_want = sum(acts.values()) or 1, sum(want.values())
     out = []
     for p, role in roles.items():
         g, w = GROUP_OF[role], weights(plan, p, role)
         zs = zscores(full[p], g, minute)
         fit, fit_last = _rating(zs, w), _rating(zscores(last[p], g, min(15, minute)), w)
         fit_before = _rating(zscores(before[p], g, minute - 15), w) if before else None
-        load, expected = acts[p] / total_acts, rel[p] / total_rel
+        load, expected = acts[p] / total_acts, want[p] / total_want
         ratio = load / expected
-        form = ("no earlier window yet" if fit_before is None else "fading" if fit_last - fit_before <= -12
-                else "rising" if fit_last - fit_before >= 12 else "steady")
+        form = ("no earlier window yet" if fit_before is None else "fading" if fit_last - fit_before <= -FADE
+                else "rising" if fit_last - fit_before >= FADE else "steady")
         flags = [f for f, cond in (
-            ("overloaded: the team leans on them more than the plan intends", ratio >= 1.5 and load >= 0.12),
-            ("bypassed: a key role in the plan is not getting the ball", rel[p] >= 4 and ratio <= 0.6),
+            ("overloaded: the team leans on them more than the plan intends", role != "GK" and ratio >= OVERLOAD),
+            ("bypassed: a key role in the plan is not getting the ball", role != "GK" and rel[p] >= 4 and ratio <= BYPASS),
             ("off plan", fit < 40), ("on plan", fit >= 60), ("fading", form == "fading")) if cond]
         ranked = sorted(w, key=lambda k: w[k] * zs[k][0])
         out.append({
@@ -193,7 +208,7 @@ def assess(events, team, minute, plan):
             "duty": plan["duties"].get(p, {}).get("duty") or f"{g} role in the team principles",
             "plan_fit": fit, "plan_fit_last_15": fit_last, "plan_fit_before_last_15": fit_before, "form": form,
             "load_share": f"{round(100 * load)}%", "plan_expected_share": f"{round(100 * expected)}%",
-            "load_vs_plan": f"{ratio:.1f}x", "flags": flags,
+            "load_vs_plan": f"{ratio:.1f}x", "load_ratio": round(ratio, 3), "flags": flags,
             "strengths": [zs[k][1] for k in ranked[::-1][:2] if zs[k][0] > 0.5],
             "concerns": [zs[k][1] for k in ranked[:2] if zs[k][0] < -0.5],
             "network_share_last_15": f"{round(100 * last[p]['network_share'])}%",
@@ -202,11 +217,18 @@ def assess(events, team, minute, plan):
 
 
 def execution(events, team, minute, plan):
-    """Is each principle working? Team score = weighted z of the principle's metrics over the players it applies to."""
+    """Is each instruction working? Team principles and player/position duties alike: score = weighted z of the
+    instruction's metrics over the players it applies to (players sharing a duty are scored together)."""
     full, roles, out = raw_metrics(events, team, 0, minute * 60), squad(team), []
     zs = {p: zscores(full[p], GROUP_OF[roles[p]], minute) for p in roles}
-    for pr in plan["principles"]:
-        ps = [p for p in roles if roles[p] in pr["roles"]]
+    duties = {}
+    for p, d in plan["duties"].items():
+        if d["metrics"]:
+            duties.setdefault((d["duty"], json.dumps(d["metrics"], sort_keys=True)), []).append(p)
+    items = [(pr["text"], pr["metrics"], [p for p in roles if roles[p] in pr["roles"]]) for pr in plan["principles"]]
+    items += [(text, json.loads(m), ps) for (text, m), ps in duties.items()]
+    for text, metrics, ps in items:
+        pr = {"text": text, "metrics": metrics}
         per = {p: sum(v * zs[p][k][0] for k, v in pr["metrics"].items()) / sum(pr["metrics"].values()) for p in ps}
         score = round(max(1, min(99, 50 + 15 * float(np.mean(list(per.values())))))) if per else 50
         best, worst = max(per, key=per.get), min(per, key=per.get)
@@ -247,19 +269,22 @@ def zones(events, team, minute, window=None):
 
 
 # ---------- parsing ----------
-KEYWORDS = [  # phrase -> metrics it is measured by (weight 1-3)
-    (r"\bpress(es|ing)?\b|counter-?press|win (it|the ball) back|hunt|high line|aggressive", {"high_recoveries": 3, "recoveries": 2}),
-    (r"possession|keep (the )?ball|build[- ]?up|patient|retain|short pass|tiki|control the game", {"completion": 3, "involvement": 2, "press_resistance": 1}),
-    (r"counter(?!-?press)|direct|vertical|transition|in behind|over the top|long ball|quick(ly)? forward", {"progressive": 3, "long_passes": 2, "final_third": 1}),
-    (r"width|wide|overlap|stretch|cross", {"box_entries": 2, "final_third": 2}),
+# phrase -> metrics it is measured by (weight 1-3). STYLE entries flip when negated ("don't press", "no long balls");
+# the others are often phrased negatively but meant positively ("never give it away cheaply", "don't panic under pressure").
+STYLE = True
+KEYWORDS = [
+    (r"\bpress(es|ing)?\b|counter-?press|win (it|the ball) back|hunt|high line|aggressive", {"high_recoveries": 3, "recoveries": 2}, STYLE),
+    (r"possession|keep (the )?ball|build[- ]?up|patient|retain|short pass|tiki|control the game", {"completion": 3, "involvement": 2, "press_resistance": 1}, STYLE),
+    (r"counter(?!-?press)|direct|vertical|transition|in behind|over the top|long ball|quick(ly)? forward", {"progressive": 3, "long_passes": 2, "final_third": 1}, STYLE),
+    (r"width|wide|overlap|stretch|cross", {"box_entries": 2, "final_third": 2}, STYLE),
     (r"creat|chance|key pass|assist|unlock|final ball|playmak", {"key_passes": 3, "xa": 2}),
-    (r"shoot|shot|finish|goal|clinical|score", {"xg": 3, "shots": 2}),
+    (r"shoot|shot|finish|goal|clinical|score", {"xg": 3, "shots": 2}, STYLE),
     (r"progress|break (the )?lines|between the lines|forward pass|carry", {"progressive": 3, "final_third": 2}),
     (r"under pressure|press[- ]resist|compos|play out|calm", {"press_resistance": 3, "completion": 1}),
     (r"secure|careless|cheap|don'?t lose|protect the ball|safe", {"completion": 2, "press_resistance": 2}),
     (r"tackl|win the ball|recover|screen|shield|ball[- ]win|intercept|defend", {"recoveries": 3}),
     (r"link|connect|hub|pivot|dictate|tempo|metronome|through (him|her|them)|orchestrat|distribut", {"network_share": 3, "involvement": 2}),
-    (r"switch|diagonal|long pass|launch", {"long_passes": 2}),
+    (r"switch|diagonal|long pass|launch", {"long_passes": 2}, STYLE),
     (r"into the box|penalty area|cut[- ]?back|feed the striker", {"box_entries": 3}),
 ]
 POSITIONS = [
@@ -276,6 +301,7 @@ POSITIONS = [
     (r"striker|cent(re|er)[- ]forward|#9|number 9|target man", ["ST"]),
     (r"front (three|line)|forwards|attackers", ["RW", "ST", "LW"]),
 ]
+NEGATION = r"\b(don'?t|do not|never|avoid|no|not|stop|shouldn'?t|mustn'?t)\b(\W+\w+){0,2}\W*$"  # up to 2 words before
 CELL = r"(^|[,|\t;]\s*)({})\s*($|[,|\t;])"  # a priority column in a pasted sheet
 EMPHASIS = [(r"\b(key|crucial|vital|focal|everything|top priority|primary|main|core|central to)\b|" + CELL.format("high|5"), 5),
             (r"\b(important|should|must)\b|" + CELL.format("medium|4"), 4),
@@ -291,8 +317,9 @@ def parse_rules(text, team):
         if len(s) < 4:
             continue
         metrics = {}
-        for rx, ms in KEYWORDS:
-            if re.search(rx, low):
+        for rx, ms, *style in KEYWORDS:
+            hit = re.search(rx, low)
+            if hit and not (style and re.search(NEGATION, re.split(r"[,;:]", low[:hit.start()])[-1])):
                 for k, v in ms.items():
                     metrics[k] = max(metrics.get(k, 0), v)
         named = [p for p in roles if re.search(rf"\b{re.escape(p.split()[-1].lower())}\b", low)]
@@ -306,6 +333,26 @@ def parse_rules(text, team):
             principles.append({"text": s, "metrics": metrics, "roles": OUTFIELD})
     first = re.split(r"(?<=[.!?])\s+|\n", text.strip())[0][:200]
     return {"summary": first, "principles": principles, "duties": duties}
+
+
+def negated_metrics(text):
+    """Metrics the coach explicitly rules out ("don't press", "no long balls") and never asks for positively elsewhere."""
+    neg, pos = set(), set()
+    for s in re.split(r"(?<=[.!?;])\s+|\n+", text.lower()):
+        for rx, ms, *style in KEYWORDS:
+            for hit in re.finditer(rx, s):
+                negated = style and re.search(NEGATION, re.split(r"[,;:]", s[:hit.start()])[-1])
+                (neg if negated else pos).update(ms)
+    return neg - pos
+
+
+def drop_negated(plan, text):
+    """Deterministic guard on the model's reading, like the agents' verifier: ruled-out metrics are removed."""
+    gone = negated_metrics(text)
+    for item in plan["principles"] + list(plan["duties"].values()):
+        item["metrics"] = {k: v for k, v in item["metrics"].items() if k not in gone}
+    plan["principles"] = [p for p in plan["principles"] if p["metrics"]]
+    return plan
 
 
 def normalise(raw, team):
@@ -361,7 +408,10 @@ Return JSON: {{"summary": one sentence, "principles": [{{"text": the instruction
  "duties": [{{"target": player name or role/group code, "duty": what they must do, "metrics": {{metric: weight 1-3}}, "relevance": 1-5}}]}}
 Team-wide ideas are principles; instructions for a named player or position are duties. Relevance = how central that
 player is to the plan (5 = the plan runs through them). Weight 3 = the core of the instruction. Instructions about
-the opponent become principles for our players (e.g. "stop their winger" -> our full-back's recoveries)."""
+the opponent become principles for our players (e.g. "stop their winger" -> our full-back's recoveries).
+Negations: never weight what the coach tells players NOT to do ("don't press" -> no pressing metrics; "no long balls"
+-> no long_passes; "avoid crossing" -> no box_entries); weight only what they should do instead. The plan may be in
+any language."""
 
 
 def parse(text, team):
@@ -376,7 +426,7 @@ def parse(text, team):
                     team=TEAMS[team]["name"], squad=", ".join(f"{p}: {r}" for p, r in squad(team).items()),
                     metrics="; ".join(f"{k} = {v}" for k, v in METRICS.items()))},
                           {"role": "user", "content": text}])
-            plan = normalise(json.loads(r.choices[0].message.content), team)
+            plan = drop_negated(normalise(json.loads(r.choices[0].message.content), team), text)
             if plan["principles"] or plan["duties"]:
                 return plan, "ai"
             why = "AI returned no usable instructions"

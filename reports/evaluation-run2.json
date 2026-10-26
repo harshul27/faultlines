@@ -1,0 +1,223 @@
+{
+ "tests": [
+  {
+   "test": "Fault lines: fragility predicts progression lost when a player goes off",
+   "passed": false,
+   "bar": "95% CI of Spearman rho above 0",
+   "result": "rho -0.083 (CI -0.132 to -0.032), 1200 paired removals",
+   "note": "Each pair: same match, same first hour, player removed at 60'. Outcome: progressive passes 60-95' lost.",
+   "what_it_shows": "The measure finds structurally important players in a passing system with no planted answer. Real football adds tactics, substitutes and opponents adapting: needs the injury/red-card study."
+  },
+  {
+   "test": "Fault lines: beyond position",
+   "passed": false,
+   "bar": "95% CI of within-position rho above 0",
+   "result": "rho 0.014 (CI -0.025 to 0.058)",
+   "note": "Predictor and outcome centred by position, so 'midfielders matter more' does not count.",
+   "what_it_shows": "Same as above."
+  },
+  {
+   "test": "Fault lines: better than counting passes",
+   "passed": false,
+   "bar": "95% CI of rho(fragility) - rho(passes) not below 0",
+   "result": "fragility -0.083 vs passes -0.109 vs betweenness -0.069 (difference CI -0.011 to 0.066)",
+   "note": "If a plain pass count predicts as well, fragility's extra complexity is not earning its place.",
+   "what_it_shows": "Same as above."
+  },
+  {
+   "test": "Plan fit: robust to the exact weights",
+   "passed": true,
+   "bar": "median tau >= 0.8, 5th percentile >= 0.6",
+   "result": "median 0.93, 5th percentile 0.83 (4000 perturbations)",
+   "note": "Every weight multiplied by a random 0.5-1.5. A low tau would mean the ranking is mostly my weight choices.",
+   "what_it_shows": "Holds for any data: this is a property of the scoring, not of football."
+  },
+  {
+   "test": "Plan fit: early reads hold up",
+   "passed": true,
+   "bar": "same side of 50 as the 90' read: 30' >= 65%, 45' >= 75%",
+   "result": "20': 68% (rho 0.458), 30': 71% (rho 0.584), 45': 77% (rho 0.708), 60': 83% (rho 0.822)",
+   "note": "Checks that the minutes adjustment keeps early verdicts from flipping later.",
+   "what_it_shows": "Real players vary more between halves (tactics, fatigue, game state), so expect lower agreement on real data."
+  },
+  {
+   "test": "Plan fit: reliable within a match",
+   "passed": false,
+   "bar": "first vs second half rho >= 0.4",
+   "result": "rho 0.06 over 1320 player-halves",
+   "note": "A score that changes completely between halves is measuring noise, not the player.",
+   "what_it_shows": "In synthetic matches players have no lasting individual quality beyond position and team strength, so this is a floor; real players should be more consistent."
+  },
+  {
+   "test": "Flags: not too many, not too few",
+   "passed": true,
+   "bar": "0.2-2.5 alert flags per team per check",
+   "result": "neutral matches 1.74, storyline matches 1.62",
+   "note": "Too many flags and coaches stop reading them.",
+   "what_it_shows": "Rates will shift on real data; retune the 1.5x / 0.6x / 12-point thresholds there."
+  },
+  {
+   "test": "Flags: 'fading' predicts the next 15 minutes",
+   "passed": false,
+   "bar": "95% CI of the fading effect below 0, controlling for the current 15-minute fit",
+   "result": "neutral: 1.7 (CI 0.01 to 3.75, 118 flags); storyline: -1.64 (CI -2.88 to -0.36, 133 flags)",
+   "note": "Next-15 fit regressed on current fit + the flag. Without the flag adding information, it is regression to the mean dressed up as insight.",
+   "what_it_shows": "The generator has no fatigue, so in neutral matches nothing real can fade; the storyline match (man-marking from 60') is the only true decline. Real test: tracking data (high-speed running) and coach substitutions."
+  },
+  {
+   "test": "Key-moment cues: informative, not spammy",
+   "passed": true,
+   "bar": "median 2-10 non-goal cues per match, none above 20",
+   "result": "neutral median 3 (range 0-6); storyline median 3",
+   "note": "Counts fault-line shifts, alerts and narrowing per match.",
+   "what_it_shows": "Precision (are they the moments an analyst would pick?) needs analyst labels on real matches."
+  },
+  {
+   "test": "Expected points added tracks results",
+   "passed": false,
+   "bar": "rho(xPA margin, points) >= 0.3",
+   "result": "rho 0.05 (xG margin: 0.40) over 240 matches",
+   "note": "Run 1 finding: xPA weights chances by what a goal is worth then, so a trailing team's chances count more and the margin does not track who won. It measures decisive moments, not dominance: use the xG margin for dominance.",
+   "what_it_shows": "By construction it inherits xG quality; on real data use the provider's xG."
+  },
+  {
+   "test": "Expected points added beats old clutch points (added after run 1)",
+   "passed": true,
+   "bar": "rho(xPA, realised points added) > rho(old clutch points, realised)",
+   "result": "xPA 0.60 vs clutch points -0.02 over 5280 player-matches",
+   "note": "Realised points added = goals (scorer and assister) x the points a goal was worth at that moment.",
+   "what_it_shows": "In synthetic data xG is the true scoring probability, which favours xPA; real xG is an estimate."
+  },
+  {
+   "test": "Plan reader (keyword rules)",
+   "passed": true,
+   "bar": ">= 70% of checks",
+   "result": "76% of 29 checks",
+   "note": "Negations, opponent instructions, sheets, other languages, emphasis.",
+   "what_it_shows": "Language understanding: independent of the match data."
+  }
+ ],
+ "raw": {
+  "fragility": {
+   "fragility": {
+    "rho": -0.083,
+    "ci": [
+     -0.132,
+     -0.032
+    ],
+    "within_role": 0.014,
+    "within_ci": [
+     -0.025,
+     0.058
+    ]
+   },
+   "passes": {
+    "rho": -0.109,
+    "ci": [
+     -0.168,
+     -0.046
+    ],
+    "within_role": -0.006,
+    "within_ci": [
+     -0.067,
+     0.065
+    ]
+   },
+   "betweenness": {
+    "rho": -0.069,
+    "ci": [
+     -0.124,
+     -0.018
+    ],
+    "within_role": 0.026,
+    "within_ci": [
+     -0.014,
+     0.065
+    ]
+   },
+   "fragility_minus_passes_ci": [
+    -0.011,
+    0.066
+   ],
+   "pairs": 1200,
+   "mean_progression_lost": -0.2
+  },
+  "plan_fit": {
+   "weights_tau": {
+    "median": 0.935,
+    "p5": 0.833,
+    "n": 4000
+   },
+   "early_reads": {
+    "20": {
+     "same_side": 0.682,
+     "rho": 0.458
+    },
+    "30": {
+     "same_side": 0.712,
+     "rho": 0.584
+    },
+    "45": {
+     "same_side": 0.77,
+     "rho": 0.708
+    },
+    "60": {
+     "same_side": 0.83,
+     "rho": 0.822
+    }
+   },
+   "split_half_rho": 0.056
+  },
+  "flags": {
+   "alerts_per_check_neutral": 1.74,
+   "alerts_per_check_storyline": 1.62,
+   "fading_neutral": {
+    "coef": 1.7,
+    "ci": [
+     0.01,
+     3.75
+    ],
+    "flagged": 118,
+    "rows": 3960
+   },
+   "fading_storyline": {
+    "coef": -1.64,
+    "ci": [
+     -2.88,
+     -0.36
+    ],
+    "flagged": 133,
+    "rows": 3960
+   }
+  },
+  "cues": {
+   "neutral": {
+    "median": 3.0,
+    "max": 6,
+    "min": 0
+   },
+   "storyline": {
+    "median": 3.0,
+    "max": 6,
+    "min": 0
+   }
+  },
+  "xpa": {
+   "rho": 0.054275664999030866,
+   "rho_xg": 0.398273338004693,
+   "rho_xpa_realised": 0.6012404135459548,
+   "rho_clutch_realised": -0.018609492956222957
+  },
+  "reader_fails": {
+   "rules": [
+    "'Everything goes through Ferrand.': expected has network_share for Luca Ferrand",
+    "'Their striker Lindqvist is dangerous; our centre-backs must ': expected has recoveries for Rui Calder",
+    "'Their striker Lindqvist is dangerous; our centre-backs must ': expected has recoveries for Jonah Pike",
+    "'Ashgrove: lead the line and finish the chances. Top priority': expected rel>= 5 for Theo Ashgrove",
+    "'Todo pasa por Ferrand: \u00e9l marca el ritmo del partido.': expected has network_share for Luca Ferrand",
+    "\"We don't need to dominate possession; let them have the ball\": expected lacks completion for team",
+    "\"We don't need to dominate possession; let them have the ball\": expected has progressive for team"
+   ]
+  }
+ }
+}

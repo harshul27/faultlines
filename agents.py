@@ -23,7 +23,7 @@ import numpy as np
 import ai
 import gameplan
 import grounding
-from match import TEAMS, params, simulate, strengths
+from match import TEAMS, params, simulate, squad, strengths
 from network import fragility, pass_graph, score_at, team_view
 
 CTX = contextvars.ContextVar("ctx")  # per-request match context + trace
@@ -73,7 +73,8 @@ def match_state() -> dict:
 
 def player_profile(player: str) -> dict:
     """One player's role in the passing network: share of the network now and at its peak, passes and
-    progressive passes in the last 15 minutes, top passing partners, late-game clutch points."""
+    progressive passes in the last 15 minutes, top passing partners, and expected points added (xPA: chances
+    created or taken, weighted by what a goal was worth at that moment)."""
     t0, c = time.perf_counter(), CTX.get()
     team, name = _find_player(player)
     if not name:
@@ -92,13 +93,14 @@ def player_profile(player: str) -> dict:
            "passes_involved_last_15": me["passes"],
            "own_passes_last_15": len(mine), "own_completion_last_15": pct(sum(e["success"] for e in mine) / len(mine)) if mine else "n/a",
            "progressive_passes_last_15": sum(e["success"] and e["end_x"] - e["x"] > 10 for e in mine),
-           "top_partners": [f"{p} ({w} passes)" for p, w in partners], "clutch_points": me["clutch"]}
+           "top_partners": [f"{p} ({w} passes)" for p, w in partners], "expected_points_added": f"{me['xpa']:+.2f}"}
     return _record("player_profile", {"player": player}, out, t0)
 
 
 def what_if_remove(player: str) -> dict:
-    """Counterfactual: remove one player from the current passing network and report what breaks: share of
-    teammates' connectivity lost, passes that ran through them, and who becomes the new fault line."""
+    """Static counterfactual: remove one player from the current passing network: share of teammates' connectivity
+    lost if play kept its current pattern, passes that ran through them, and who becomes the new fault line.
+    It measures dependence now, not certain damage: teams can re-route play (see the assumption field)."""
     t0, c = time.perf_counter(), CTX.get()
     team, name = _find_player(player)
     if not name:
@@ -114,6 +116,8 @@ def what_if_remove(player: str) -> dict:
            "teammates_connectivity_lost": pct(fragility(G)[name]),
            "passes_through_player_last_15": f"{through} of {int(total)} ({pct(through / total) if total else '0%'})",
            "new_fault_line_without_them": f"{new_fl} would hold {pct(after[new_fl])} of the network",
+           "assumption": "static: the team keeps its current passing pattern. In evaluation the simulated teams re-routed "
+                         "play after losing a player, so treat this as how much play depends on them now, not as certain damage",
            "most_affected_partners": [f"{b if a == name else a} ({d['weight']} passes with {name.split()[-1]})"
                                       for a, b, d in sorted(G.edges(name, data=True), key=lambda e: -e[2]["weight"])[:3]]}
     return _record("what_if_remove", {"player": player}, out, t0)
@@ -204,7 +208,8 @@ def assess_player(player: str) -> dict:
 
 def squad_assessment(team: str) -> dict:
     """Every player of a team against the game plan, best plan fit first, with who is overloaded, off plan or
-    fading, and substitution candidates (who to take off: lowest recent plan fit). There is no bench data."""
+    fading, who is bypassed (a key role not getting the ball), and substitution candidates (who to take off: lowest
+    recent plan fit). There is no bench data."""
     t0, c = time.perf_counter(), CTX.get()
     side = _side(team)
     rows = gameplan.assess(c["events"], side, c["minute"], c["plans"][side])
@@ -349,8 +354,10 @@ ANALYST_PROMPT = (
     "is the game plan / press / build-up working -> plan_execution; what the plan asks of someone -> game_plan; "
     "where to attack, where we lose or win the ball, the opponent's weak side -> zone_report (for both teams if needed); "
     "facts about a player's passing network -> player_profile; removing or marking a player -> what_if_remove "
-    "(also use it before recommending taking off a key player); who wins -> win_probability; "
-    "changes over time -> compare_windows. Combine tools when the question needs it.")
+    "(always call it before any advice on substituting a specific player, whichever way you advise); "
+    "who wins -> win_probability; "
+    "changes over time -> compare_windows. Combine tools when the question needs it. Never ask the coach for player "
+    "names or positions: the line-ups are in the message; look players up by position there.")
 
 
 @lru_cache(maxsize=1)
@@ -359,7 +366,8 @@ def _analyst():
     from agent_framework.openai import OpenAIChatCompletionClient
     client = OpenAIChatCompletionClient(model=ai.deployment("chat"), credential=ai.credential(),
                                         azure_endpoint=ai.endpoint(), api_version=ai.API_VERSION)
-    return Agent(client, ANALYST_PROMPT, name="analyst", tools=[tool(_off_loop(f)) for f in TOOLS])
+    return Agent(client, ANALYST_PROMPT, name="analyst", tools=[tool(_off_loop(f)) for f in TOOLS],
+                 default_options={"temperature": 0})  # same question, same advice
 
 
 def _off_loop(f):
@@ -376,6 +384,29 @@ async def _analyse(prompt, session=None):
     CTX.get()["trace"].append({"agent": "Analyst (gpt-4.1-mini, Agent Framework)", "detail": "drafted answer",
                                "ms": round((time.perf_counter() - t0) * 1000)})
     return resp.text.strip()
+
+
+SUB_VERB = re.compile(r"\b(take|taking|bring|bringing|sub|subbing|substitut\w*|replac\w*|withdraw\w*|hook\w*)\b", re.I)
+
+
+def advice_issues(answer):
+    """Coaching guard: recommending a key player (plan relevance 4-5) off needs the counterfactual first, and the
+    keeper is never a substitution candidate (there is no bench data). Checked like the numbers: deterministically."""
+    c, issues = CTX.get(), []
+    checked = {_find_player(s["args"].get("player"))[1] for s in c["trace"] if s.get("tool") == "what_if_remove"}
+    for sentence in re.split(r"(?<=[.!?])\s+", answer):
+        if not SUB_VERB.search(sentence):
+            continue
+        for team in TEAMS:
+            for name, role in squad(team).items():
+                if not re.search(rf"\b{re.escape(name.split()[-1])}\b", sentence):
+                    continue
+                if role == "GK":
+                    issues.append(f"do not suggest substituting the goalkeeper {name}: there is no bench data")
+                elif c["plans"][team]["duties"].get(name, {}).get("relevance", 3) >= 4 and name not in checked:
+                    issues.append(f"{name} is a key player in the plan; call what_if_remove for {name} and say what "
+                                  f"the team would lose before recommending a change")
+    return list(dict.fromkeys(issues))
 
 
 def _fallback():
@@ -410,12 +441,15 @@ async def ask(question, events, minute, seed, language="English", history=(), pl
 
     from agent_framework import AgentSession
     session = AgentSession()
+    lineups = "; ".join(f"{TEAMS[t]['name']}: " + ", ".join(f"{p} ({r})" for p, r in squad(t).items()) for t in TEAMS)
     prompt = (f"Match minute: {minute}. The coach's team: {TEAMS[plan_team]['name']} ('our', 'we' and 'us' mean them). "
+              f"Line-ups (role codes: GK keeper, RB/LB full-backs, RCB/LCB centre-backs, CDM holding midfielder, "
+              f"RCM/LCM central midfielders, RW/LW wingers, ST striker): {lineups}.\n"
               f"Router: intent={route['intent']}, team={route['team']}, players={route['players']}.\n"
               + (f"Relevant earlier conversation: {' | '.join(memory)}\n" if memory else "") + f"Question: {question}")
     answer = await _analyse(prompt, session)
     calls += 1
-    issues = grounding.check(answer, *ctx["outputs"], question, str(minute))
+    issues = grounding.check(answer, *ctx["outputs"], question, str(minute)) + advice_issues(answer)
     if not ctx["outputs"]:
         issues.append("no tool was called, so nothing is grounded in data")
     ctx["trace"].append({"agent": "Verifier", "detail": "passed" if not issues else "; ".join(issues), "ms": 0})
@@ -424,7 +458,7 @@ async def ask(question, events, minute, seed, language="English", history=(), pl
         answer = await _analyse("The verifier rejected your answer: " + "; ".join(issues) + ". Rewrite it using only "
                                 "numbers and directions exactly as the tools returned them (call tools if needed).", session)
         calls += 1
-        issues = grounding.check(answer, *ctx["outputs"], question, str(minute))
+        issues = grounding.check(answer, *ctx["outputs"], question, str(minute)) + advice_issues(answer)
         if not ctx["outputs"]:
             issues.append("no tool was called")
         ctx["trace"].append({"agent": "Verifier", "detail": "passed after rewrite" if not issues else "failed again -> deterministic answer", "ms": 0})

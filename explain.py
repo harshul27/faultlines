@@ -33,7 +33,7 @@ def facts(view, opponent, score, favourite=None):
     fav = next((p for p in view["players"] if p["name"] == favourite), None)
     if fav:
         f.update(favourite_player=fav["name"], favourite_role=fav["role"], favourite_passes_in_window=fav["passes"],
-                 connectivity_lost_without_favourite=pct(fav["fragility"]), favourite_clutch_points=fav["clutch"])
+                 connectivity_lost_without_favourite=pct(fav["fragility"]), favourite_expected_points_added=f"{fav['xpa']:+.2f}")
     return f
 
 
@@ -55,7 +55,7 @@ def template(f, mode):
     if "favourite_player" in f:
         s += (f" Your player {f['favourite_player']}: {f['favourite_passes_in_window']} passes in the last "
               f"{f['window_minutes']} min, holds {f['connectivity_lost_without_favourite']} of the network, "
-              f"clutch points {f['favourite_clutch_points']}.")
+              f"expected points added {f['favourite_expected_points_added']}.")
     return s
 
 

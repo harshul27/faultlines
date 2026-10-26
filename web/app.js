@@ -22,6 +22,7 @@ const px = (x, y) => [x * 1.05, y * 0.68];
 const clock = (t) => `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
 const surname = (n) => (n || "").split(" ").slice(-1)[0];
 const pct = (v) => `${Math.round(v * 100)}%`;
+const xpa = (v) => `${v >= 0 ? "+" : ""}${(v ?? 0).toFixed(2)}`;
 const teamColor = (t) => getComputedStyle(document.documentElement).getPropertyValue(t === "home" ? "--home" : "--away").trim();
 const other = (t) => (t === "home" ? "away" : "home");
 function fragColor(f) {
@@ -122,7 +123,7 @@ function renderLive() {
     $("fl-text").textContent = (early ? `Based on the first ${Math.floor(S.snap.minute)} minutes only. ` : "") + (ai || (S.snap.explain?.[S.follow]?.[S.mode] ?? ""));
     $("fl-source").textContent = ai ? `${AI.source === "ai" ? "Microsoft Foundry · grounded" : AI.source} · ${AI.minute}'` : AI.on ? "updating…" : "template";
     const fav = ts.players.find((p) => p.name === S.fav);
-    $("fav-text").textContent = fav ? `Your player ${fav.name}: ${fav.passes} passes in the last 15 min, holds ${pct(fav.fragility)} of the network, clutch points ${fav.clutch}.` : "";
+    $("fav-text").textContent = fav ? `Your player ${fav.name}: ${fav.passes} passes in the last 15 min, holds ${pct(fav.fragility)} of the network, expected points added ${xpa(fav.xpa)}.` : "";
   }
   const m = t / 60;
   lineChart($("spark-conn"), ["home", "away"].map((tm) => ({ color: teamColor(tm), pts: minuteSeries((s) => s.teams[tm].efficiency) })), { yMax: 45, marker: m, xMax: 95 });
@@ -181,7 +182,7 @@ function renderAnalysis() {
   $("pp-name").textContent = sel ? `${sel}${now ? ` · ${now.role}` : ""}` : "Choose a player";
   const tiles = now ? [
     [pct(now.fragility), "network held now"], peak[0] ? [pct(peak[1]), `peak (${peak[0]}')`] : ["–", "peak (from 15')"], [now.passes, "passes, last 15 min"],
-    [now.betweenness.toFixed(2), "betweenness"], [now.clutch, "clutch points"],
+    [now.betweenness.toFixed(2), "betweenness"], [xpa(now.xpa), "expected points added"],
     [S.events.filter((e) => e.player === sel && e.type === "pass").length, "passes, match"],
   ] : [];
   $("pp-tiles").innerHTML = tiles.map(([v, l]) => `<div class="tile"><b>${v}</b><span>${l}</span></div>`).join("");

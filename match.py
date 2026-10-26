@@ -76,8 +76,12 @@ def _pos(role, bx, by, c, rng, sd=5):
     return min(99, max(1, rng.gauss(px, sd))), min(99, max(1, rng.gauss(py, sd)))
 
 
-def simulate(seed=7, minutes=95, p=None, storyline=True, st=None):
-    """Yield events in time order: dicts with t, minute, team, type, player, recipient, x, y, end_x, end_y, success, pressure, xg, goal."""
+def simulate(seed=7, minutes=95, p=None, storyline=True, st=None, absent=None, fork=None):
+    """Yield events in time order: dicts with t, minute, team, type, player, recipient, x, y, end_x, end_y, success, pressure, xg, goal.
+    absent=(team, player, from_seconds) plays that side a man down from then on (red card / injury, no substitute);
+    the random stream is unchanged until then, so a match with and without the absence is a paired experiment.
+    fork=(from_seconds, seed) reseeds the random stream once at that time: replays of the same first part with fresh,
+    shared randomness afterwards (common random numbers for paired experiments)."""
     p = p or params()
     rng = random.Random(seed)
     roles = {t: squad(t) for t in TEAMS}
@@ -88,8 +92,13 @@ def simulate(seed=7, minutes=95, p=None, storyline=True, st=None):
     t, team = 0.0, "home"
     holder = TEAMS[team]["players"][5]
     x, y = 50.0, 50.0
+    gone = lambda tm, pl: absent is not None and (tm, pl) == tuple(absent[:2]) and t >= absent[2]
+    avail = lambda tm: [q for q in roles[tm] if not gone(tm, q)]
 
     while t < minutes * 60:
+        if fork and t >= fork[0]:
+            rng.seed(fork[1])
+            fork = None
         t += rng.uniform(0.5, 1.5) * p["step"]
         role = roles[team][holder]
         marked = storyline and t >= MARK_FROM
@@ -102,12 +111,14 @@ def simulate(seed=7, minutes=95, p=None, storyline=True, st=None):
                        x=round(x, 1), y=round(y, 1), end_x=100.0, end_y=50.0, success=goal, pressure=False, xg=xg, goal=goal)
             team = other[team]
             holder = TEAMS[team]["players"][5 if goal else 0]  # kickoff by CDM, else goal kick by GK
+            if gone(team, holder):
+                holder = avail(team)[0]
             x, y = (50.0, 50.0) if goal else (5.0, 50.0)
             continue
 
         weights = []
         for pl, r in roles[team].items():
-            if pl == holder or (r == "GK" and x > 30):
+            if pl == holder or (r == "GK" and x > 30) or gone(team, pl):
                 weights.append(0)
                 continue
             px, py = shape(r, x, y, p["compact"])
@@ -130,7 +141,7 @@ def simulate(seed=7, minutes=95, p=None, storyline=True, st=None):
             holder, x, y = recipient, ex, ey
         else:  # turnover: nearest opponent wins it, coordinates flip into their frame
             team, x, y = other[team], 100 - ex, 100 - ey
-            holder = min(roles[team], key=lambda q: math.hypot(BASE[roles[team][q]][0] - x, BASE[roles[team][q]][1] - y))
+            holder = min(avail(team), key=lambda q: math.hypot(BASE[roles[team][q]][0] - x, BASE[roles[team][q]][1] - y))
 
 
 if __name__ == "__main__":

@@ -99,7 +99,7 @@ with right:
     with st.expander("Latest broadcast overlay cue (machine-readable)"):
         st.json(eng.cues[-1] if eng.cues else {})
 
-st.dataframe(df[["name", "role", "passes", "fragility", "fragility_prev", "betweenness", "clutch"]],
+st.dataframe(df[["name", "role", "passes", "fragility", "fragility_prev", "betweenness", "xpa"]],
              hide_index=True, use_container_width=True)
 
 if live and minute < 95:

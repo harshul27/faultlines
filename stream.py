@@ -24,14 +24,17 @@ CUE_SCHEMA = {
         "latency_ms": {"type": "number", "minimum": 0},
     },
 }
-ALERT, REARM, MARGIN = 0.20, 0.15, 0.05  # alert at 20%; re-arm below 15%; a new fault line must lead by 5 pts
-NARROWING, MIN_GAP = -0.15, 300          # drop in passing spread (play concentrated into fewer links); seconds between same cue
+# ALERT and NARROWING are calibrated on ordinary matches (python evaluate.py --calibrate; seeds 7000+, never used by the
+# tests) so each cue type fires in about half of ordinary team-matches: a cue marks what is unusual for the league.
+ALERT, NARROWING = 0.40, -0.18  # fault-line share that triggers an alert; drop in passing spread (play narrowing)
+REARM, MARGIN, HOLD, MIN_GAP = round(ALERT - 0.05, 2), 0.05, 120, 300  # re-arm 5 pts lower; a new fault line must lead by 5 pts
+                                                            # for 2 minutes; seconds between cues of one kind
 
 
 class LiveEngine:
     def __init__(self, window=15):
         self.window, self.events, self.cues = window, [], []
-        self.spof, self.last, self.armed = {}, {}, {}
+        self.spof, self.last, self.armed, self.challenger = {}, {}, {}, {}
 
     def _cue(self, kind, e, team, headline, prio, player=None, value=None, anchor=None):
         key = (kind, team)
@@ -56,12 +59,22 @@ class LiveEngine:
             s, prev = v["spof"], self.spof.get(team)
             anchor = {"x": s["x"], "y": s["y"]}
             if prev and s["name"] != prev["name"]:
-                prev_now = next(q["fragility"] for q in v["players"] if q["name"] == prev["name"])
-                if s["fragility"] - prev_now < MARGIN:  # hysteresis: keep the incumbent unless clearly overtaken
-                    s = next(q for q in v["players"] if q["name"] == prev["name"])
-                elif s["fragility"] >= 0.10:
-                    out.append(self._cue("fault_line_shift", e, team, f"Play now runs through {s['name']}", 2,
-                                         s["name"], s["fragility"], anchor))
+                incumbent = next(q for q in v["players"] if q["name"] == prev["name"])
+                name, since = self.challenger.get(team, (None, 0))
+                if s["fragility"] - incumbent["fragility"] < MARGIN:  # hysteresis: not clearly overtaken
+                    s = incumbent
+                    self.challenger.pop(team, None)
+                elif name != s["name"] or e["t"] - since < HOLD:  # debounce: the challenger must stay ahead for HOLD s
+                    if name != s["name"]:
+                        self.challenger[team] = (s["name"], e["t"])
+                    s = incumbent
+                else:
+                    self.challenger.pop(team, None)
+                    if s["fragility"] >= ALERT:
+                        out.append(self._cue("fault_line_shift", e, team, f"Play now runs through {s['name']}", 2,
+                                             s["name"], s["fragility"], anchor))
+            else:
+                self.challenger.pop(team, None)
             if s["fragility"] < REARM:
                 self.armed[team] = True
             if s["fragility"] >= ALERT and self.armed.get(team, True):

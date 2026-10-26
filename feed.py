@@ -18,7 +18,7 @@ def team_snapshot(v, team):
     players = []
     for p in v["players"]:
         x, y = _frame(team, p["x"], p["y"])
-        players.append({**{k: p[k] for k in ("name", "role", "passes", "fragility", "betweenness", "clutch")}, "x": x, "y": y})
+        players.append({**{k: p[k] for k in ("name", "role", "passes", "fragility", "betweenness", "xpa")}, "x": x, "y": y})
     return dict(name=v["name"], efficiency=v["efficiency"], efficiency_prev=v["efficiency_prev"],
                 progressive=v["progressive"], progressive_prev=v["progressive_prev"], completion=v["completion"],
                 spof=v["spof"]["name"], players=players, edges=v["edges"])

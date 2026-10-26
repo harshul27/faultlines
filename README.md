@@ -14,7 +14,7 @@ challenge requirement is met and tested.
 | Interpret | Rolling pass network per team; **fragility** = share of the other players' passing connectivity lost if a player is removed; progression and ball security per window | `network.py` |
 | Explain | Microsoft Foundry model writes the story from computed facts only; a fact-check rejects any number not in the facts | `explain.py` |
 | Render | Pitch overlay, live cue feed, timed broadcast cues validated against a JSON Schema | `app.py`, `stream.py` |
-| Personalize | Follow a club, a favourite player (with late-game clutch score), Casual/Analyst mode, 7 languages | `app.py` |
+| Personalize | Follow a club, a favourite player (with expected points added), Casual/Analyst mode, 7 languages | `app.py` |
 
 ## Web page (live + deep analysis)
 **https://harshul27.github.io/faultlines/**: a static page with two tabs:
@@ -86,6 +86,21 @@ cleaned, that sheet priorities parse, and that the demo hub shows as overloaded 
 `/assess` needs no AI. Limits: there is no bench data (candidates are who to take off), no tracking data (no
 off-ball runs or distance covered), and the norms come from the synthetic league.
 
+
+## How far to trust each part: evaluation
+`python evaluate.py [--ai]` tests the judgement-based parts against pass bars fixed in code before the first run, on
+held-out simulated matches, and writes [reports/evaluation.md](reports/evaluation.md). Earlier runs and every change
+between them are kept in `reports/`; no pass bar was moved. Latest: **10 of 19 pass.**
+
+| Holds up | Fails, and what it means |
+|---|---|
+| Plan fit is robust to the exact weights (Kendall tau 0.93 under +-50% changes) and early reads hold (77% agree at 45') | Plan fit barely agrees between halves (rho 0.06): synthetic players have no individual quality, so real-data reliability is still unproven |
+| Flags (1.7 per team per check) and cues (3 per match) after calibrating thresholds on ordinary matches | 'Fading' detects a real decline (man-marking) but in ordinary play flagged players bounce back: read it as a dip |
+| Expected points added beats the old clutch points (rho 0.60 vs -0.02 with realised decisive contributions) | It does not track results (by design it weights moments, not dominance): use xG for dominance |
+| AI plan reader 97% of hard cases (negations, sheets, Spanish, opponent instructions); rules 76% | Fault lines: in simulation, teams re-route play after losing a player, so fragility measures dependence now, not certain damage. The what-if now says so; the injury/red-card study on real data decides it |
+| Agents: 0 coaching-guard violations, 8% fallbacks, model-judged quality 4.7/5 | Agents choose the right tools 88% of the time (bar 90%) and repeat the same advice 67% (bar 80%); one wrong flank call was caught (right-back vs left-back) |
+
+The report ends with the real-data studies, fixed in advance, that would settle each open question.
 
 ## Run
 ```bash

@@ -37,6 +37,9 @@
       <button id="mode-casual" role="radio" aria-checked="true">Casual</button>
       <button id="mode-analyst" role="radio" aria-checked="false">Analyst</button>
     </span>
+    <label id="lang-wrap" hidden>Language <select id="lang">
+      <option>English</option><option>Spanish</option><option>French</option><option>Portuguese</option>
+      <option>Hindi</option><option>Arabic</option><option>Japanese</option></select></label>
     <label class="check"><input id="show-opp" type="checkbox"> Opponent</label>
   </section>
 
@@ -58,7 +61,8 @@
         <div class="card fault">
           <div class="label">Fault line</div>
           <div class="big"><span id="fl-name">–</span><span id="fl-value" class="value"></span></div>
-          <p id="fl-text" class="explain"></p>
+          <p id="fl-text" class="explain" dir="auto"></p>
+          <div id="fl-source" class="muted small"></div>
           <p id="fav-text" class="explain fav-line"></p>
         </div>
         <div class="card">

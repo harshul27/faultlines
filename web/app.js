@@ -4,7 +4,7 @@ const $ = (id) => document.getElementById(id);
 const NS = "http://www.w3.org/2000/svg";
 const S = {
   meta: null, events: [], cues: [], minutes: [], snap: null,
-  follow: "home", mode: "Casual", fav: "", selected: "", showOpp: false,
+  follow: "home", mode: "Casual", lang: "English", fav: "", selected: "", showOpp: false,
   source: null, live: false, t: 0, speed: 10, playing: true,
   lastEventT: 0, lastEventAt: 0, delays: [], procs: [], dirty: true, lastAnalysis: 0,
 };
@@ -118,7 +118,9 @@ function renderLive() {
     $("fl-name").textContent = ts.spof;
     const early = S.snap.minute < 15;  // the rolling window is not full yet: flag the read as provisional
     $("fl-value").textContent = pct(spof.fragility) + (early ? " · early read" : "");
-    $("fl-text").textContent = (early ? `Based on the first ${Math.floor(S.snap.minute)} minutes only. ` : "") + (S.snap.explain?.[S.follow]?.[S.mode] ?? "");
+    const ai = AI.ctx === aiContext() ? AI.text : "";  // never show an AI line written for another team/mode/language
+    $("fl-text").textContent = (early ? `Based on the first ${Math.floor(S.snap.minute)} minutes only. ` : "") + (ai || (S.snap.explain?.[S.follow]?.[S.mode] ?? ""));
+    $("fl-source").textContent = ai ? `${AI.source === "ai" ? "Microsoft Foundry · grounded" : AI.source} · ${AI.minute}'` : AI.on ? "updating…" : "template";
     const fav = ts.players.find((p) => p.name === S.fav);
     $("fav-text").textContent = fav ? `Your player ${fav.name}: ${fav.passes} passes in the last 15 min, holds ${pct(fav.fragility)} of the network, clutch points ${fav.clutch}.` : "";
   }
@@ -355,13 +357,35 @@ function frame(now) {
     S.dirty = false;
   } else if (S.pending && now - S.lastAnalysis > 400) { renderAnalysis(); S.lastAnalysis = now; S.pending = false; }
   if (S.live) $("sb-clock").textContent = clock(currentT());  // keep the live clock ticking between events
+  refreshAI(now);
   requestAnimationFrame(frame);
 }
+
+// ---------- AI explanations (Microsoft Foundry via the live server; grounded, cached per match minute) ----------
+const AI = { on: false, ctx: "", text: "", source: "", minute: 0, busy: false, last: 0, asked: "" };
+const aiContext = () => [S.live ? "live" : S.meta?.seed, S.follow, S.mode, S.lang, S.fav].join("|");
+async function refreshAI(now) {
+  const minute = Math.floor(currentT() / 60);
+  if (!AI.on || !S.meta || AI.busy || minute < 1 || now - AI.last < 1500) return;
+  const ctx = aiContext(), ask = `${ctx}|${minute}`;
+  if (ask === AI.asked) return;
+  AI.busy = true; AI.last = now; AI.asked = ask;
+  try {
+    const q = new URLSearchParams({ seed: S.live ? "live" : S.meta.seed, minute, team: S.follow, mode: S.mode, lang: S.lang, fav: S.fav });
+    const r = await fetch(`${LIVE}/explain?${q}`, { signal: AbortSignal.timeout(20000) });
+    if (r.ok && aiContext() === ctx) Object.assign(AI, { ctx, ...(({ text, source, minute }) => ({ text, source, minute }))(await r.json()) });
+    S.dirty = true;
+  } catch { /* keep the template; try again next minute */ } finally { AI.busy = false; }
+}
+$("lang").onchange = (e) => { S.lang = e.target.value; S.dirty = true; };
 
 async function liveAvailable() {
   try {
     const r = await fetch(`${LIVE}/health`, { signal: AbortSignal.timeout(2500) });
-    return r.ok && (await r.json()).ok;
+    const h = r.ok ? await r.json() : null;
+    AI.on = Boolean(h?.ai);
+    $("lang-wrap").hidden = !AI.on;
+    return Boolean(h?.ok);
   } catch { return false; }
 }
 

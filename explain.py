@@ -70,12 +70,14 @@ _client = None
 def _llm():
     global _client
     if _client is None:
-        from azure.identity import AzureCliCredential, get_bearer_token_provider
+        from azure.identity import DefaultAzureCredential, get_bearer_token_provider
         from openai import AzureOpenAI
+        # No keys: `az login` locally, the container's managed identity in Azure
         _client = AzureOpenAI(
             azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"], api_version="2024-10-21",
             azure_ad_token_provider=get_bearer_token_provider(
-                AzureCliCredential(), "https://cognitiveservices.azure.com/.default"))
+                DefaultAzureCredential(exclude_interactive_browser_credential=True),
+                "https://cognitiveservices.azure.com/.default"))
     return _client
 
 
@@ -89,7 +91,7 @@ def explain(f, mode="Casual", language="English"):
         {"role": "system", "content": (
             f"You are {style}. Write 2-3 sentences in {language} explaining why the key player matters to their "
             "team's passing network right now, and whether the team is still moving the ball forward. Use ONLY the facts given. Copy numbers exactly as written; "
-            "do not compute or invent any other number.")},
+            "do not compute or invent any other number. Always write digits as 0-9.")},
         {"role": "user", "content": json.dumps(f, ensure_ascii=False)},
     ]
     try:

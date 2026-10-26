@@ -38,6 +38,14 @@ uvicorn server:app --port 8000          # live feed + page at http://127.0.0.1:8
 python check_web.py                     # static data + live SSE protocol tests
 ```
 
+### Azure deployment
+| Piece | Azure service | Notes |
+|---|---|---|
+| Live feed + `/explain` API | **Azure Container Apps** (`server.py`, `Dockerfile`) | 1 replica (shared match clock), 0.25 vCPU, external HTTPS ingress, SSE |
+| AI explanations | **Microsoft Foundry**, `gpt-4.1-mini` (GlobalStandard) | Keyless: the container's **managed identity** has *Cognitive Services OpenAI User*; answers are fact-checked, cached per match minute, capped per day (`AI_DAILY_CAP`) |
+| Image | **Azure Container Registry** (Basic) | Pulled with the app's managed identity (*AcrPull*), no registry passwords |
+| Page | GitHub Pages | CORS on the API allows only the page's origin |
+
 ## Run
 ```bash
 pip install -r requirements.txt

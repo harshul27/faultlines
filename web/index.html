@@ -94,6 +94,24 @@
         <div id="ask-log" class="ask-log" aria-live="polite"></div>
       </div>
       <div class="card wide">
+        <div class="label">Game plan <span class="muted">(your tactics as paragraphs, bullet points or a sheet: player, position, instruction, priority; applies to the team you follow)</span></div>
+        <textarea id="plan-text" rows="5" maxlength="6000" aria-label="Game plan" placeholder="e.g. Everything goes through Ferrand. Full-backs overlap and deliver into the box. Wingers counter-press high."></textarea>
+        <div class="plan-bar">
+          <button id="plan-apply" type="button" class="primary">Apply plan</button>
+          <label class="filebtn">Load file<input id="plan-file" type="file" accept=".txt,.csv,.tsv,.md"></label>
+          <button id="plan-reset" type="button">Demo plan</button>
+          <span id="plan-src" class="muted small"></span>
+        </div>
+        <div id="plan-read" class="plan-read"></div>
+      </div>
+      <div class="card wide">
+        <div class="label">Squad vs game plan <span class="muted">(plan fit 0-100: 50 = league norm for the role on the metrics your plan weights · load = share of team actions vs what the plan intends · click a player)</span></div>
+        <p id="squad-off" class="muted small" hidden>Player assessment runs on the live server.</p>
+        <div id="exec" class="exec"></div>
+        <div class="table-wrap"><table id="squad" class="squad"></table></div>
+        <div id="squad-detail" class="squad-detail"></div>
+      </div>
+      <div class="card wide">
         <div class="label">Network dependence over time <span class="muted">(share of teammates' passing connectivity lost without each player; faded = first 15 min, low confidence; click a row)</span></div>
         <div id="heat" class="heat"></div>
       </div>

@@ -41,9 +41,9 @@ python check_web.py                     # static data + live SSE protocol tests
 ### Azure deployment
 | Piece | Azure service | Notes |
 |---|---|---|
-| Live feed + `/explain` API | **Azure Container Apps** (`server.py`, `Dockerfile`) | 1 replica (shared match clock), 0.25 vCPU, external HTTPS ingress, SSE |
+| Live feed + `/explain`, `/ask`, `/plan`, `/assess` API | **Azure Container Apps**, workload-profiles environment (`server.py`, `Dockerfile`) | 1 replica (shared match clock), 0.5 vCPU / 1 GiB, external HTTPS ingress, SSE. Express environments can't use managed identity, so this runs on a standard one |
 | AI explanations + agents | **Microsoft Foundry**: `gpt-4.1-mini` (analyst, narration, translation), `Phi-4-mini-instruct` (router), `text-embedding-3-small` (memory) | Keyless: the container's **managed identity** has *Cognitive Services OpenAI User*; answers are fact-checked, cached per match minute, capped per day (`AI_DAILY_CAP`) |
-| Image | **Azure Container Registry** (Basic) | Pulled with the app's managed identity (*AcrPull*), no registry passwords |
+| Image | **Azure Container Registry** (Basic), built by **GitHub Actions** (`.github/workflows/image.yml`) | ACR Tasks are blocked on student subscriptions, so CI builds and pushes `:sha` and `:latest`; registry credentials live only in GitHub and Container Apps secrets |
 | Page | GitHub Pages | CORS on the API allows only the page's origin |
 
 ## AI agents: "Ask the analyst"
@@ -54,11 +54,37 @@ Viewers ask free-text questions on the Deep analysis tab (`POST /ask`). A small 
 |---|---|---|
 | Router | **Phi-4-mini-instruct** | Micro-decision gate: question → JSON intent + confidence. Off-topic or unclear questions stop here (no big-model call). Hedged request: if Phi is slow, gpt-4.1-mini races it after 2.5 s; keyword rules if both fail |
 | Memory | text-embedding-3-small | Keeps only earlier turns whose embedding similarity to the new question clears a salience threshold, not the last N |
-| Analyst | gpt-4.1-mini via **Agent Framework** | Calls match tools: `match_state`, `player_profile`, `what_if_remove` (counterfactual network without a player), `win_probability` (10,000-run Monte Carlo from the current score), `compare_windows` |
+| Analyst | gpt-4.1-mini via **Agent Framework** | Calls match tools: `match_state`, `player_profile`, `what_if_remove` (counterfactual network without a player), `win_probability` (10,000-run Monte Carlo from the current score), `compare_windows`; and game-plan tools: `game_plan`, `assess_player`, `squad_assessment` (incl. who to take off), `plan_execution`, `zone_report` |
 | Verifier | deterministic | Every number must come from a tool output and every trend must keep its direction (`grounding.py`); on failure the analyst gets the critique and rewrites once (self-reflection), else a deterministic answer from the tool outputs |
 | Translator | gpt-4.1-mini | Translates only the verified English answer; the numbers must survive unchanged or the English is shown |
 
 Cost and safety: inputs validated, AI calls capped per day, answers rendered as text (never HTML), keyless managed identity.
+
+## Game plan: every player judged against the coach's tactics
+The coach pastes the game plan on the Deep analysis tab: paragraphs, bullet points or a sheet
+(`player, position, instruction, priority`). `gameplan.py` turns it into weighted, measurable instructions and the
+agents answer coach questions against it ("Who should I take off?", "Is our press working?", "How is Brightwell doing
+in his role?", "Where should we attack?").
+
+1. **Read the plan** (`POST /plan`): gpt-4.1-mini in JSON mode maps each instruction to metrics with weights 1-3 and
+   gives every player a relevance to the plan (1-5). Keyword rules do it when AI is off. Either way the result is
+   validated (`normalise`): known metrics only, weights and relevance clamped, names resolved to the squad.
+2. **Weight each player**: role job description (e.g. a CB on completion, progression, recoveries) + every team
+   principle that covers the role + the player's own duty, counted double.
+3. **Rate against role norms**: 14 metrics per player (involvement, completion, progressive passes, final-third and box
+   entries, key passes, xA, xG, shots, press resistance, recoveries, high recoveries, long passes, network share),
+   each compared with the role's norm from 40 simulated league matches and scaled to the minutes played (Poisson /
+   binomial z-scores, so an early read isn't over-confident). Plan fit = 50 + 15 × weighted z, so 50 = league norm.
+4. **Load vs plan**: each player's share of the team's on-ball actions against the share their relevance implies.
+   Flags: *overloaded* (the team leans on them more than the plan intends), *bypassed* (a key role isn't getting the
+   ball), *off plan*, *on plan*, *fading* (last 15 minutes vs before).
+5. **Plan execution and zones**: each team principle scored as working / mixed / not working, with who executes it
+   best and least. Plus where the team enters the final third, shoots, loses and wins the ball.
+
+`python check.py` asserts that league-average players average a plan fit of about 50, that untrusted plans are
+cleaned, that sheet priorities parse, and that the demo hub shows as overloaded and then fading once man-marked.
+`/assess` needs no AI. Limits: there is no bench data (candidates are who to take off), no tracking data (no
+off-ball runs or distance covered), and the norms come from the synthetic league.
 
 
 ## Run

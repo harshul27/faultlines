@@ -2,7 +2,8 @@
 
     Router (Phi-4-mini)      micro-decision gate: question -> JSON intent + confidence; off-topic/unclear stops here
     Memory (embeddings)      keeps only earlier turns whose embedding is close to the new question (salience)
-    Analyst (gpt-4.1-mini)   Agent Framework agent with match tools; every number must come from a tool
+    Analyst (gpt-4.1-mini)   Agent Framework agent with match and game-plan tools (gameplan.py: every player rated on
+                             the metrics their role and the coach's plan weight); every number must come from a tool
     Verifier (deterministic) checks numbers and trend directions against the tool outputs; one self-correcting
                              rewrite, then a deterministic fallback built from the tool outputs
     Translator (gpt-4.1-mini) translates the verified English answer; numbers must survive unchanged
@@ -20,12 +21,13 @@ from functools import lru_cache
 import numpy as np
 
 import ai
+import gameplan
 import grounding
 from match import TEAMS, params, simulate, strengths
 from network import fragility, pass_graph, score_at, team_view
 
 CTX = contextvars.ContextVar("ctx")  # per-request match context + trace
-INTENTS = ("match_summary", "player", "what_if", "prediction", "trend", "off_topic")
+INTENTS = ("match_summary", "player", "assessment", "tactics", "substitution", "what_if", "prediction", "trend", "off_topic")
 pct = lambda v: f"{round(v * 100)}%"
 
 
@@ -155,7 +157,7 @@ def compare_windows(team: str, earlier_minute: int, later_minute: int) -> dict:
     """Compare one team between two match minutes (each a rolling 15-minute window): fault line,
     passing spread, progressive passes and pass completion, with the direction of each change."""
     t0, c = time.perf_counter(), CTX.get()
-    side = "home" if team.lower() in ("home", TEAMS["home"]["name"].lower(), "northbridge") else "away"
+    side = _side(team)
     a, b = (max(15, min(int(earlier_minute), c["minute"])), max(15, min(int(later_minute), c["minute"])))
     va, vb = team_view(c["events"], side, a), team_view(c["events"], side, b)
     out = {"team": TEAMS[side]["name"], "earlier": f"{a}'", "later": f"{b}'",
@@ -166,15 +168,94 @@ def compare_windows(team: str, earlier_minute: int, later_minute: int) -> dict:
     return _record("compare_windows", {"team": team, "earlier_minute": earlier_minute, "later_minute": later_minute}, out, t0)
 
 
-TOOLS = [match_state, player_profile, what_if_remove, win_probability, compare_windows]
+def _side(team):
+    """'home'/'away' from a side, club name or nickname; defaults to the side whose game plan the coach gave."""
+    t = (team or "").lower()
+    for s in TEAMS:
+        if t and (t == s or t in TEAMS[s]["name"].lower() or TEAMS[s]["name"].split()[0].lower() in t):
+            return s
+    return CTX.get()["plan_team"]
+
+
+def game_plan(team: str) -> dict:
+    """The coach's game plan for a team as the analysis reads it: team principles (and the metrics that measure
+    each), and each player's duty and relevance to the plan (1-5)."""
+    t0, c = time.perf_counter(), CTX.get()
+    side = _side(team)
+    plan = c["plans"][side]
+    out = {"team": TEAMS[side]["name"], "source": "coach's plan" if side == c["plan_team"] and c["custom_plan"] else "default demo plan",
+           "summary": plan["summary"],
+           "principles": [{"instruction": p["text"], "measured_by": [gameplan.METRICS[k] for k in p["metrics"]]} for p in plan["principles"]],
+           "duties": {p: {"duty": d["duty"], "relevance": f"{d['relevance']}/5"} for p, d in plan["duties"].items()}}
+    return _record("game_plan", {"team": team}, out, t0)
+
+
+def assess_player(player: str) -> dict:
+    """How one player is doing in their role against the game plan: plan fit 0-100 (50 = role norm) for the match
+    and the last 15 minutes, form, load vs what the plan intends, flags (overloaded, bypassed, off plan, fading),
+    strengths and concerns with the evidence, and the metrics their role and duty are weighted on."""
+    t0, c = time.perf_counter(), CTX.get()
+    team, name = _find_player(player)
+    if not name:
+        return _record("assess_player", {"player": player}, {"error": f"No player called {player}"}, t0)
+    row = next(r for r in gameplan.assess(c["events"], team, c["minute"], c["plans"][team]) if r["player"] == name)
+    return _record("assess_player", {"player": player}, {"team": TEAMS[team]["name"], **row}, t0)
+
+
+def squad_assessment(team: str) -> dict:
+    """Every player of a team against the game plan, best plan fit first, with who is overloaded, off plan or
+    fading, and substitution candidates (who to take off: lowest recent plan fit). There is no bench data."""
+    t0, c = time.perf_counter(), CTX.get()
+    side = _side(team)
+    rows = gameplan.assess(c["events"], side, c["minute"], c["plans"][side])
+    out_field = [r for r in rows if r["role"] != "GK"]
+    subs = sorted((r for r in out_field if r["plan_fit_last_15"] < 50),
+                  key=lambda r: r["plan_fit_last_15"] - (10 if r["form"] == "fading" else 0))[:3]
+    out = {"team": TEAMS[side]["name"], "minute": c["minute"],
+           "players": [{k: r[k] for k in ("player", "role", "plan_relevance", "plan_fit", "plan_fit_last_15", "form", "load_vs_plan", "flags")} for r in rows],
+           "overloaded": [r["player"] for r in rows if any(f.startswith("overloaded") for f in r["flags"])],
+           "off_plan": [r["player"] for r in rows if "off plan" in r["flags"]],
+           "substitution_candidates": [{"player": r["player"], "plan_relevance": r["plan_relevance"],
+                                        "plan_fit_last_15": r["plan_fit_last_15"], "form": r["form"],
+                                        "concerns": r["concerns"], "network_share_last_15": r["network_share_last_15"]} for r in subs],
+           "note": "plan fit 50 = role norm; no bench data, so candidates are who to take off, not who to bring on"}
+    return _record("squad_assessment", {"team": team}, out, t0)
+
+
+def plan_execution(team: str) -> dict:
+    """Is the game plan working? For each team principle: a score 0-100 (50 = league norm), working / mixed /
+    not working, what measures it, and who executes it best and least; plus overall plan execution."""
+    t0, c = time.perf_counter(), CTX.get()
+    side = _side(team)
+    out = {"team": TEAMS[side]["name"], **gameplan.execution(c["events"], side, c["minute"], c["plans"][side])}
+    return _record("plan_execution", {"team": team}, out, t0)
+
+
+def zone_report(team: str, last_minutes: int = 0) -> dict:
+    """Where a team gets into the final third and shoots (by channel: left / centre / right of its attack), and
+    where it loses and wins the ball. last_minutes=0 means the whole match so far. Use it for 'where should we
+    attack', 'where are we losing the ball' and the opponent's weak side."""
+    t0, c = time.perf_counter(), CTX.get()
+    out = gameplan.zones(c["events"], _side(team), c["minute"], int(last_minutes) or None)
+    return _record("zone_report", {"team": team, "last_minutes": last_minutes}, out, t0)
+
+
+TOOLS = [match_state, player_profile, what_if_remove, win_probability, compare_windows,
+         game_plan, assess_player, squad_assessment, plan_execution, zone_report]
 
 
 # ---------- router: Phi-4-mini micro-decision gate, hedged ----------
 ROUTER_PROMPT = """Classify a viewer's question about ONE football match (Northbridge FC = home, Riverside Athletic = away). Output one JSON object and nothing else.
-intent: player (about one player), what_if (removing, marking, subbing or injuring a player), prediction (who wins, final score), trend (change between times), match_summary (general state), off_topic (anything not about this match).
+intent: player (facts about one player), assessment (how a player or the squad is performing in their role / against the game plan, who is overloaded or struggling), tactics (is the game plan or press working, where to attack, where we lose the ball, tactical changes), substitution (who to take off or change), what_if (removing, marking or injuring a specific player), prediction (who wins, final score), trend (change between times), match_summary (general state), off_topic (anything not about this match or football coaching).
 
 Question: Who is Northbridge's most important passer?
 JSON: {"intent": "match_summary", "team": "home", "players": [], "confidence": 0.8}
+Question: How is Brightwell doing in his role?
+JSON: {"intent": "assessment", "team": "home", "players": ["Owen Brightwell"], "confidence": 0.9}
+Question: Is our press working and which flank should we attack?
+JSON: {"intent": "tactics", "team": null, "players": [], "confidence": 0.9}
+Question: Who should I take off?
+JSON: {"intent": "substitution", "team": null, "players": [], "confidence": 0.9}
 Question: What if Ferrand gets injured?
 JSON: {"intent": "what_if", "team": "home", "players": ["Luca Ferrand"], "confidence": 0.95}
 Question: Will Riverside come back?
@@ -202,8 +283,11 @@ def _rules(question):
     """Last-resort router: keywords. Always answers, never smart."""
     q = question.lower()
     players = [p for t in TEAMS for p in TEAMS[t]["players"] if p.split()[-1].lower() in q]
-    intent = ("what_if" if re.search(r"what if|without|removed|marked|injur|sub", q) else
-              "prediction" if re.search(r"win|final score|come back|predict", q) else
+    intent = ("what_if" if re.search(r"what if|without|removed|marked|injur", q) else
+              "substitution" if re.search(r"\bsub|take (\w+ )?off|bring (\w+ )?off|replac|tired|fatigu|fresh legs", q) else
+              "prediction" if re.search(r"\bwin\b|winning|final score|come back|predict", q) else
+              "tactics" if re.search(r"plan|press|tactic|shape|formation|where should|weak|exploit|build[- ]?up|counter|zone|flank|channel|side", q) else
+              "assessment" if re.search(r"perform|doing|rating|struggl|overload|carry|load|job|role|form\b|best|worst|playing", q) else
               "trend" if re.search(r"change|since|between|after|before", q) else
               "player" if players else "match_summary")
     return {"intent": intent, "team": None, "players": players, "confidence": 0.6}
@@ -256,11 +340,17 @@ def _memory(question, history):
 
 # ---------- analyst: Microsoft Agent Framework agent with tools ----------
 ANALYST_PROMPT = (
-    "You are a football analyst for a live broadcast. Answer in English in 2-4 sentences for the viewer. "
+    "You are the assistant coach and analyst on the bench, answering the head coach (or a viewer) during a live match. "
+    "Answer in English in 2-5 sentences; when the question asks what to do, end with one concrete recommendation. "
     "Call the tools to get data: NEVER state a number that a tool did not return. Copy numbers, percentages and "
-    "trend directions exactly as the tools word them (e.g. 'down 21%'). Name players in full the first time. "
-    "If the question is about a player, call player_profile; for 'what if' questions about a player, call "
-    "what_if_remove; for who wins, call win_probability; for changes over time, call compare_windows.")
+    "trend directions exactly as the tools word them (e.g. 'down 21%', 'plan fit 44'). Name players in full the first time. "
+    "Tools: how a player is doing in their role or against the plan -> assess_player (plan fit 50 = role norm); "
+    "the whole squad, who is overloaded, struggling or off plan, who to take off -> squad_assessment; "
+    "is the game plan / press / build-up working -> plan_execution; what the plan asks of someone -> game_plan; "
+    "where to attack, where we lose or win the ball, the opponent's weak side -> zone_report (for both teams if needed); "
+    "facts about a player's passing network -> player_profile; removing or marking a player -> what_if_remove "
+    "(also use it before recommending taking off a key player); who wins -> win_probability; "
+    "changes over time -> compare_windows. Combine tools when the question needs it.")
 
 
 @lru_cache(maxsize=1)
@@ -297,9 +387,14 @@ def _fallback():
 
 
 # ---------- orchestration ----------
-async def ask(question, events, minute, seed, language="English", history=()):
-    """Returns {answer, language, source, route, trace, model_calls}."""
-    ctx = {"events": events, "minute": minute, "seed": seed, "trace": [], "outputs": []}
+async def ask(question, events, minute, seed, language="English", history=(), plan=None, plan_team="home"):
+    """Returns {answer, language, source, route, trace, model_calls}. plan: the coach's normalised game plan for
+    plan_team (the other side, and plan_team without one, use the default demo plans)."""
+    plans = {t: gameplan.default_plan(t) for t in TEAMS}
+    if plan:
+        plans[plan_team] = plan
+    ctx = {"events": events, "minute": minute, "seed": seed, "trace": [], "outputs": [],
+           "plans": plans, "plan_team": plan_team, "custom_plan": bool(plan)}
     CTX.set(ctx)
     calls = 0
     memory = await asyncio.to_thread(_memory, question, list(history)[-6:]) if history else []
@@ -308,14 +403,15 @@ async def ask(question, events, minute, seed, language="English", history=()):
     calls += 1 + ("hedge" in who)
     if route["intent"] == "off_topic" or route["confidence"] < 0.35:
         ctx["trace"].append({"agent": "Gate", "detail": f"intent={route['intent']}, confidence={route['confidence']}: no analyst call", "ms": 0})
-        msg = ("I can only answer questions about this match: try 'Why does Northbridge depend on Ferrand?', "
-               "'What happens if Ferrand is marked out?' or 'Who wins from here?'")
+        msg = ("I can only answer questions about this match and your game plan: try 'Who should I take off?', "
+               "'Is our game plan working?' or 'What happens if Ferrand is marked out?'")
         out, _ = await asyncio.to_thread(grounding.translate, msg, language)
         return dict(answer=out, language=language, source="router (gated)", route=route, trace=ctx["trace"], model_calls=calls + (language != "English"))
 
     from agent_framework import AgentSession
     session = AgentSession()
-    prompt = (f"Match minute: {minute}. Router: intent={route['intent']}, team={route['team']}, players={route['players']}.\n"
+    prompt = (f"Match minute: {minute}. The coach's team: {TEAMS[plan_team]['name']} ('our', 'we' and 'us' mean them). "
+              f"Router: intent={route['intent']}, team={route['team']}, players={route['players']}.\n"
               + (f"Relevant earlier conversation: {' | '.join(memory)}\n" if memory else "") + f"Question: {question}")
     answer = await _analyse(prompt, session)
     calls += 1

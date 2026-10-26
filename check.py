@@ -83,3 +83,41 @@ assert not fact_check(f"Passing spread is {word} {n}.", cw), "a correct trend mu
 assert agents._rules("What if Ferrand is subbed off?")["intent"] == "what_if"
 assert agents._rules("Who will win this?")["intent"] == "prediction"
 print("agents ok")
+
+# Game plan -> weighted player assessment
+import gameplan as gp
+
+plan = gp.default_plan("home")
+assert plan["duties"]["Luca Ferrand"]["relevance"] == 5 and "network_share" in plan["duties"]["Luca Ferrand"]["metrics"], "plan hub parsed"
+assert "high_recoveries" not in plan["duties"]["Rui Calder"]["metrics"], "'under pressure' is not a pressing instruction"
+sheet = gp.normalise(gp.parse_rules("Player,Position,Instruction,Priority\nLuca Ferrand,CDM,Dictate tempo,High\n"
+                                    "Owen Brightwell,RCM,Break lines,Medium\nMilo Dancy,RW,Stay wide and cross,Low", "home"), "home")
+assert [sheet["duties"][p]["relevance"] for p in ("Luca Ferrand", "Owen Brightwell", "Milo Dancy")] == [5, 4, 2], "sheet priorities"
+bad = gp.normalise({"principles": [{"text": "x", "metrics": {"bogus": 3, "xg": 9}}], "duties": [
+    {"target": "Nobody", "metrics": {"xg": 1}}, {"target": "CB", "metrics": {"recoveries": 2}, "relevance": 99}]}, "home")
+assert bad["principles"][0]["metrics"] == {"xg": 3.0} and set(bad["duties"]) == {"Rui Calder", "Jonah Pike"}, "untrusted plans are cleaned"
+assert all(d["relevance"] == 5 for d in bad["duties"].values()) and gp.normalise(plan, "home") == plan, "clamped; idempotent"
+fits = [r["plan_fit"] for s in range(500, 510) for t in TEAMS for r in gp.assess(list(simulate(s, storyline=False)), t, 90, gp.default_plan(t))]
+assert 44 <= np.mean(fits) <= 56, f"league-norm players should average ~50 plan fit, got {np.mean(fits):.1f}"
+rows = {r["player"]: r for r in gp.assess([e for e in ev if e["t"] < 4200], "home", 70, plan)}
+assert len(rows) == 11 and all(1 <= r["plan_fit"] <= 99 for r in rows.values())
+assert any(f.startswith("overloaded") for f in rows[HUB[1]]["flags"]) and rows[HUB[1]]["form"] == "fading", \
+    "the hub carries more load than the plan intends, and fades once man-marked (60')"
+ex = gp.execution(ev, "home", 70, plan)
+assert len(ex["principles"]) == len(plan["principles"]) and 1 <= ex["overall_plan_execution"] <= 99
+z = gp.zones(ev, "home", 70)
+raw = gp.raw_metrics(ev, "home", 0, 4200)
+assert sum(z["final_third_entries_by_channel"].values()) == sum(r["final_third"] for r in raw.values()), "zones agree with metrics"
+
+agents.CTX.set({"events": [e for e in ev if e["t"] < 70 * 60], "minute": 70, "seed": 23, "trace": [], "outputs": [],
+                "plans": {t: gp.default_plan(t) for t in TEAMS}, "plan_team": "home", "custom_plan": False})
+sq, ap = agents.squad_assessment("our team"), agents.assess_player("Ferrand")
+assert sq["team"] == TEAMS["home"]["name"] and len(sq["players"]) == 11 and ap["player"] == HUB[1]
+assert all(c["player"] != "Tomas Varga" for c in sq["substitution_candidates"]), "never suggest taking off the keeper"
+assert agents.plan_execution("Riverside")["team"] == TEAMS["away"]["name"] and agents.zone_report("home", 15)["window"] == "last 15 min"
+assert agents.game_plan("home")["duties"][HUB[1]]["relevance"] == "5/5"
+for q, want in [("Who should I take off?", "substitution"), ("Is our press working?", "tactics"),
+                ("How is Brightwell performing in his role?", "assessment"), ("What if Ferrand is subbed off?", "what_if"),
+                ("Which flank should we attack?", "tactics")]:
+    assert agents._rules(q)["intent"] == want, (q, agents._rules(q))
+print("game plan ok")

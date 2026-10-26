@@ -27,6 +27,7 @@ from starlette.staticfiles import StaticFiles
 
 import agents
 import ai
+import gameplan
 from explain import explain, facts, template
 from feed import DEMO_SEEDS, compact_event, match_meta, snapshot
 from match import TEAMS, simulate
@@ -214,12 +215,74 @@ async def ask_route(request):
         return JSONResponse({"error": "question must be 3-300 characters; language must be supported"}, status_code=400)
     if not _spend(6):  # worst case per question: memory, router + hedge, analyst x2, translator
         return JSONResponse({"error": "daily AI limit reached; try again tomorrow"}, status_code=429)
+    try:
+        plan_team, plan = _plan_from(body)
+    except (ValueError, TypeError, AttributeError):
+        return JSONResponse({"error": "invalid game plan"}, status_code=400)
     real_seed = channel.seed if seed == "live" else seed
     try:
-        out = await agents.ask(question, _events(seed, minute), minute, real_seed, lang, history)
+        out = await agents.ask(question, _events(seed, minute), minute, real_seed, lang, history, plan, plan_team)
     except Exception as e:  # a model outage must not take the page down
         return JSONResponse({"error": f"agents unavailable ({type(e).__name__}); try again"}, status_code=502)
     return JSONResponse({**out, "minute": minute})
+
+
+def _plan_from(body):
+    """(team, normalised plan or None) from a request body; the browser's copy of the plan is re-validated."""
+    team = body.get("plan_team", "home")
+    if team not in TEAMS:
+        raise ValueError("invalid team")
+    plan = body.get("plan")
+    if plan is None:
+        return team, None
+    if not isinstance(plan, dict) or len(json.dumps(plan)) > 20_000:
+        raise ValueError("invalid plan")
+    return team, gameplan.normalise(plan, team)
+
+
+async def plan_route(request):
+    """Coach's game plan (free text or a pasted sheet) -> structured, weighted plan. Works without AI (rules).
+    GET ?team= returns the demo plan's text and its reading."""
+    if request.method == "GET":
+        team = request.query_params.get("team", "home")
+        if team not in TEAMS:
+            return JSONResponse({"error": "invalid team"}, status_code=400)
+        return JSONResponse({"text": gameplan.DEFAULT_PLANS[team], "plan": gameplan.default_plan(team),
+                             "source": "keyword rules", "metrics": gameplan.METRICS})
+    try:
+        body = await request.json()
+        text, team = str(body.get("text", "")).strip(), body.get("team", "home")
+    except (ValueError, AttributeError):
+        return JSONResponse({"error": "invalid request"}, status_code=400)
+    if not 10 <= len(text) <= 6000 or team not in TEAMS:
+        return JSONResponse({"error": "plan must be 10-6000 characters for home or away"}, status_code=400)
+    if ai.enabled() and _spend(1):
+        plan, source = await asyncio.to_thread(gameplan.parse, text, team)
+    else:
+        plan, source = gameplan.normalise(gameplan.parse_rules(text, team), team), "rules"
+    return JSONResponse({"plan": plan, "source": source, "metrics": gameplan.METRICS})
+
+
+async def assess_route(request):
+    """Squad assessment, plan execution and zones for one team at one minute. Deterministic: no AI needed."""
+    try:
+        body = await request.json()
+        seed, minute = _parse_common(body)
+        plan_team, plan = _plan_from(body)
+    except LookupError as e:
+        return JSONResponse({"error": str(e)}, status_code=409)
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return JSONResponse({"error": "invalid request"}, status_code=400)
+    plan = plan or gameplan.default_plan(plan_team)
+    events = _events(seed, minute)
+
+    def run():
+        return {"team": plan_team, "minute": minute, "plan": plan,
+                "players": gameplan.assess(events, plan_team, minute, plan),
+                "execution": gameplan.execution(events, plan_team, minute, plan),
+                "zones": gameplan.zones(events, plan_team, minute),
+                "metrics": gameplan.METRICS}
+    return JSONResponse(await asyncio.to_thread(run))
 
 
 async def health(_):
@@ -233,6 +296,7 @@ async def lifespan(_):
     task = asyncio.create_task(channel.run())
     for seed in DEMO_SEEDS:  # warm the Monte Carlo rates so the first prediction question is instant
         asyncio.get_running_loop().run_in_executor(None, agents._goal_rates, seed)
+    asyncio.get_running_loop().run_in_executor(None, gameplan.norms)  # role norms for player assessment
     if ai.enabled():  # first model calls are slow (sign-in, cold deployments): take that hit before viewers do
         asyncio.get_running_loop().run_in_executor(None, agents.warm_up)
     yield
@@ -241,6 +305,7 @@ async def lifespan(_):
 
 app = Starlette(
     routes=[Route("/live", live), Route("/health", health), Route("/explain", explain_route), Route("/ask", ask_route, methods=["POST"]),
+            Route("/plan", plan_route, methods=["GET", "POST"]), Route("/assess", assess_route, methods=["POST"]),
             Mount("/", StaticFiles(directory=Path(__file__).parent / "web", html=True))],
     middleware=[Middleware(CORSMiddleware, allow_origins=os.getenv("ALLOW_ORIGIN", "*").split(","), allow_methods=["GET", "POST"], allow_headers=["content-type"])],
     lifespan=lifespan)

@@ -24,7 +24,7 @@ Every requirement from the challenge brief and the official rules, where it is m
 | Criterion | Evidence | Gap / next step |
 |---|---|---|
 | Technological implementation | 81/19 train/test split by time (4,940 / 1,190 real matches), regularisation tuned inside training years, 17/17 held-out checks, requirement and web/SSE tests in CI on every push | — |
-| Agentic design & innovation | Multi-agent "Ask the analyst" on Microsoft Agent Framework: Phi-4-mini router (gated, hedged), embedding-salience memory, tool-using analyst (what-if counterfactual, Monte Carlo win probability), deterministic verifier with one self-correcting rewrite, number-preserving translator; full trace shown to viewers | — |
+| Agentic design & innovation | Multi-agent "Ask the analyst" on Microsoft Agent Framework: Phi-4-mini router (gated, hedged), embedding-salience memory, tool-using analyst (what-if counterfactual, Monte Carlo win probability, game-plan assessment: every player rated on the metrics the coach's plan weights, load vs plan, substitutions, zones), deterministic verifier with one self-correcting rewrite, number-preserving translator; full trace shown to viewers | — |
 | Real-world impact & applicability | Broadcast-ready cue schema; latency budget; fragility is a scouting/tactics metric clubs could use on real data | See roadmap in README |
 | User experience & presentation | Public web page (live + deep analysis, mobile-friendly) and Streamlit app | Record the < 2 min demo |
 | Adherence to category | All five pipeline stages covered (table above) | — |

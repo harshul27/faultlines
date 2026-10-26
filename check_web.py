@@ -85,6 +85,15 @@ try:
     assert httpx.get(f"{base}/explain", params={"seed": 23, "minute": 70, "lang": "Klingon"}, timeout=5).status_code == 400
     ex = httpx.get(f"{base}/explain", params={"seed": 23, "minute": 70, "team": "home", "lang": "Spanish"}, timeout=30).json()
     assert ex["source"] == "template" and ex["text"], "no AI configured -> grounded template"
+    # Game plan: demo plan, rules parsing without AI, deterministic squad assessment, untrusted plans rejected
+    demo = httpx.get(f"{base}/plan", params={"team": "home"}, timeout=10).json()
+    assert demo["text"] and demo["plan"]["duties"], "demo plan served"
+    mine = httpx.post(f"{base}/plan", json={"text": "Keep the ball with patient possession. Everything through Ferrand. Wingers press high.", "team": "home"}, timeout=10).json()
+    assert mine["source"] == "rules" and mine["plan"]["duties"]["Luca Ferrand"]["relevance"] == 5
+    sq = httpx.post(f"{base}/assess", json={"seed": 23, "minute": 70, "plan_team": "home", "plan": mine["plan"]}, timeout=60).json()
+    assert len(sq["players"]) == 11 and sq["execution"]["principles"] and sq["zones"], "squad vs plan"
+    assert httpx.post(f"{base}/assess", json={"seed": 23, "minute": 70, "plan": "x" * 10}, timeout=10).status_code == 400
+    assert httpx.post(f"{base}/plan", json={"text": "short", "team": "home"}, timeout=10).status_code == 400
 finally:
     proc.terminate()
 print("ok")

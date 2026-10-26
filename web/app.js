@@ -338,6 +338,7 @@ for (const t of ["home", "away"]) $(`follow-${t}`).onclick = () => {
   S.follow = t; S.selected = "";
   $("follow-home").setAttribute("aria-checked", t === "home"); $("follow-away").setAttribute("aria-checked", t === "away");
   fillFavourites(); S.dirty = true; S.lastAnalysis = 0;
+  showPlan(); renderSquad(); ASSESS.key = ""; ASSESS.last = 0;
 };
 for (const m of ["Casual", "Analyst"]) $(`mode-${m.toLowerCase()}`).onclick = () => {
   S.mode = m;
@@ -360,6 +361,7 @@ function frame(now) {
   } else if (S.pending && now - S.lastAnalysis > 400) { renderAnalysis(); S.lastAnalysis = now; S.pending = false; }
   if (S.live) $("sb-clock").textContent = clock(currentT());  // keep the live clock ticking between events
   refreshAI(now);
+  refreshAssess(now);
   requestAnimationFrame(frame);
 }
 
@@ -385,10 +387,11 @@ $("lang").onchange = (e) => { S.lang = e.target.value; S.dirty = true; };
 const askHistory = [];
 const node = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
 function renderChips() {
-  const team = S.meta?.teams[S.follow].name, fl = S.snap?.teams[S.follow].spof;
+  const team = S.meta?.teams[S.follow].name, fl = S.snap?.teams[S.follow].spof, sel = S.selected || S.fav || fl;
   if (!team) return;
-  const chips = [fl && `Why does ${team} depend on ${fl}?`, fl && `What happens if ${fl} is marked out of the game?`,
-    "Who is going to win from here?", `How has ${team} changed since half-time?`].filter(Boolean);
+  const chips = ["Is our game plan working?", "Who should I take off?", sel && `How is ${sel} doing against the plan?`,
+    "Where should we attack, and where are we losing the ball?", fl && `What happens if ${fl} is marked out of the game?`,
+    "Who is going to win from here?"].filter(Boolean);
   if ($("ask-chips").dataset.key === chips.join("|")) return;
   $("ask-chips").dataset.key = chips.join("|");
   $("ask-chips").replaceChildren(...chips.map((c) => { const b = node("button", "", c); b.type = "button"; b.onclick = () => { $("ask-q").value = c; askAnalyst(); }; return b; }));
@@ -404,7 +407,8 @@ async function askAnalyst() {
   $("ask-go").disabled = true; $("ask-q").value = "";
   try {
     const r = await fetch(`${LIVE}/ask`, { method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(60000),
-      body: JSON.stringify({ question, minute, seed: S.live ? "live" : S.meta.seed, lang: S.lang, history: askHistory.slice(-6) }) });
+      body: JSON.stringify({ question, minute, seed: S.live ? "live" : S.meta.seed, lang: S.lang, history: askHistory.slice(-6),
+        plan_team: S.follow, plan: PLAN[S.follow]?.custom ? PLAN[S.follow].plan : null }) });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
     const a = entry.querySelector(".a"); a.textContent = d.answer; a.dir = "auto";
@@ -421,10 +425,107 @@ async function askAnalyst() {
 }
 $("ask-form").onsubmit = (e) => { e.preventDefault(); askAnalyst(); };
 
+// ---------- Game plan + squad assessment (server-side, deterministic; plan text is inserted with textContent only) ----------
+const PLAN = { home: null, away: null };  // per team: { text, plan, source, custom }
+const ASSESS = { key: "", busy: false, last: 0, data: null };
+const SERVER = { on: false };
+const saved = {
+  get: (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
+  set: (k, v) => { try { v ? localStorage.setItem(k, JSON.stringify(v)) : localStorage.removeItem(k); } catch { /* private mode */ } },
+};
+const label = (k) => k.replaceAll("_", " ");
+async function loadPlan(team, demo = false) {
+  const mine = !demo && saved.get(`fl-plan-${team}`);
+  if (mine?.plan) PLAN[team] = mine;
+  else {
+    try {
+      const d = await (await fetch(`${LIVE}/plan?team=${team}`, { signal: AbortSignal.timeout(8000) })).json();
+      PLAN[team] = { text: d.text, plan: d.plan, source: d.source, custom: false };
+    } catch { return; }
+    if (demo) saved.set(`fl-plan-${team}`, null);
+  }
+  if (team === S.follow) { showPlan(); ASSESS.key = ""; }
+}
+function showPlan() {
+  const p = PLAN[S.follow];
+  $("plan-text").value = p?.text ?? "";
+  $("plan-src").textContent = p ? `${p.custom ? "Your plan" : "Demo plan"} · read by ${p.source}` : "";
+  const rows = [];
+  for (const pr of p?.plan.principles ?? []) {
+    const d = node("div"); d.append(node("b", "", "Team"), node("span", "", pr.text), ...Object.keys(pr.metrics).map((k) => node("span", "tag", label(k)))); rows.push(d);
+  }
+  for (const [name, du] of Object.entries(p?.plan.duties ?? {})) {
+    const d = node("div"); d.append(node("b", "", `${name} · relevance ${du.relevance}/5`), node("span", "", du.duty), ...Object.keys(du.metrics).map((k) => node("span", "tag", label(k)))); rows.push(d);
+  }
+  $("plan-read").replaceChildren(...rows);
+}
+async function applyPlan() {
+  const text = $("plan-text").value.trim(), team = S.follow;
+  if (text.length < 10) { $("plan-src").textContent = "Write at least a sentence of instructions."; return; }
+  $("plan-apply").disabled = true; $("plan-src").textContent = "Reading your plan…";
+  try {
+    const r = await fetch(`${LIVE}/plan`, { method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(70000),
+      body: JSON.stringify({ text, team }) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+    PLAN[team] = { text, plan: d.plan, source: d.source, custom: true };
+    saved.set(`fl-plan-${team}`, PLAN[team]);
+    if (team === S.follow) { showPlan(); ASSESS.key = ""; ASSESS.last = 0; }
+  } catch (err) { $("plan-src").textContent = `Couldn't read the plan: ${err.message}`; } finally { $("plan-apply").disabled = false; }
+}
+$("plan-apply").onclick = applyPlan;
+$("plan-reset").onclick = () => loadPlan(S.follow, true);
+$("plan-file").onchange = async (e) => { const f = e.target.files[0]; if (f) $("plan-text").value = (await f.text()).slice(0, 6000); e.target.value = ""; };
+
+async function refreshAssess(now) {
+  const p = PLAN[S.follow], minute = Math.floor(currentT() / 60);
+  if (!SERVER.on || $("panel-analysis").hidden || !S.meta || !p || ASSESS.busy || minute < 5 || now - ASSESS.last < 3000) return;
+  const key = [S.live ? "live" : S.meta.seed, S.follow, minute, p.custom, p.text].join("|");
+  if (key === ASSESS.key) return;
+  ASSESS.busy = true; ASSESS.last = now;
+  try {
+    const r = await fetch(`${LIVE}/assess`, { method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(15000),
+      body: JSON.stringify({ seed: S.live ? "live" : S.meta.seed, minute, plan_team: S.follow, plan: p.custom ? p.plan : null }) });
+    if (r.ok) { ASSESS.data = await r.json(); ASSESS.key = key; renderSquad(); }
+  } catch { /* try again in a few seconds */ } finally { ASSESS.busy = false; }
+}
+function renderSquad() {
+  const d = ASSESS.data?.team === S.follow ? ASSESS.data : null;
+  if (!d) { $("exec").replaceChildren(); $("squad").replaceChildren(); $("squad-detail").replaceChildren(); return; }
+  const tone = (s) => (s === "working" ? "good" : s === "not working" ? "bad" : "warn");
+  const overall = node("div"); overall.append(node("b", "", d.execution.overall_plan_execution ?? "–"), node("span", "", `overall plan execution at ${d.minute}'`));
+  $("exec").replaceChildren(overall, ...d.execution.principles.map((p) => {
+    const x = node("div"); x.append(node("b", "", p.score), node("span", `tag ${tone(p.status)}`, p.status), node("div", "muted", p.principle)); return x;
+  }));
+  const sel = d.players.find((r) => r.player === S.selected) ?? d.players[0];
+  const head = node("tr"); for (const h of ["Player", "Relevance", "Plan fit", "Last 15", "Form", "Load vs plan", "Flags"]) head.append(node("th", "", h));
+  const thead = node("thead"); thead.append(head);
+  const tbody = node("tbody");
+  const fitTone = (v) => (v >= 60 ? "var(--good)" : v < 40 ? "var(--bad)" : "var(--accent)");
+  const flagTag = (f) => { const short = f.split(":")[0]; return node("span", `tag ${short === "on plan" ? "good" : short === "off plan" || short === "fading" ? "bad" : "warn"}`, short); };
+  for (const r of d.players) {
+    const tr = node("tr", r === sel ? "sel" : "");
+    const fit = node("div", "fit"), bar = node("i"); bar.style.width = `${r.plan_fit}%`; bar.style.background = fitTone(r.plan_fit); fit.append(bar, node("span", "", r.plan_fit));
+    const flags = node("td"); flags.append(...r.flags.map(flagTag));
+    const cells = [node("td", "", `${r.player} · ${r.role}`), node("td", "", r.plan_relevance), node("td"), node("td", "", r.plan_fit_last_15),
+      node("td", "", r.form), node("td", "", `${r.load_vs_plan} (${r.load_share} vs ${r.plan_expected_share})`), flags];
+    cells[2].append(fit); tr.append(...cells);
+    tr.onclick = () => { S.selected = r.player; S.dirty = true; S.lastAnalysis = 0; renderSquad(); };
+    tbody.append(tr);
+  }
+  $("squad").replaceChildren(thead, tbody);
+  const det = $("squad-detail"); det.replaceChildren(node("b", "", `${sel.player} (${sel.role}): `), node("span", "", sel.duty));
+  const list = (title, items) => { if (!items.length) return; det.append(node("div", "muted small", title)); const ul = node("ul"); ul.append(...items.map((t) => node("li", "", t))); det.append(ul); };
+  list("Strengths", sel.strengths); list("Concerns", sel.concerns);
+  list("Judged on (weights from role + plan)", [Object.entries(sel.weighted_metrics).map(([k, w]) => `${label(k)} ×${w}`).join(" · ")]);
+  for (const f of sel.flags.filter((f) => f.includes(":"))) det.append(node("div", "small", `⚠ ${f}`));
+}
+
 async function liveAvailable() {
   try {
     const r = await fetch(`${LIVE}/health`, { signal: AbortSignal.timeout(2500) });
     const h = r.ok ? await r.json() : null;
+    SERVER.on = Boolean(h?.ok);
     AI.on = Boolean(h?.ai);
     $("lang-wrap").hidden = !AI.on;
     return Boolean(h?.ok);
@@ -433,6 +534,9 @@ async function liveAvailable() {
 
 (async function init() {
   const [index, live] = await Promise.all([fetch("data/index.json").then((r) => r.json()), liveAvailable()]);
+  $("squad-off").hidden = live;
+  $("plan-apply").disabled = !live;
+  if (live) { loadPlan("home"); loadPlan("away"); }
   $("source").innerHTML = (live ? `<option value="live">Live feed</option>` : "") +
     index.map((m) => `<option value="${m.file}">Replay: match ${m.seed} (${m.home} ${m.final} ${m.away})</option>`).join("");
   const want = params.get("match");

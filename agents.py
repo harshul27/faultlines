@@ -298,10 +298,19 @@ def _rules(question):
     return {"intent": intent, "team": None, "players": players, "confidence": 0.6}
 
 
+_routes = {}  # (question, memory) -> (route, who). Same question, same routing: which model wins the hedge race
+# depends on latency, and the two can label a question differently. ponytail: per-process dict, capped.
+
+
 def _route(question, memory):
-    """Hedged request: Phi-4-mini first; if it is slow, gpt-4.1-mini races it; first valid answer wins."""
+    """Hedged request: Phi-4-mini first; if it is slow, gpt-4.1-mini races it; first valid answer wins (and is cached)."""
     from concurrent.futures import FIRST_COMPLETED, wait
     t0 = time.perf_counter()
+    key = (" ".join(question.lower().split()), memory)
+    if key in _routes:
+        route, who = _routes[key]
+        CTX.get()["trace"].append({"agent": f"Router (cached: {who})", "detail": f"{route}", "ms": 0})
+        return dict(route), f"cached: {who}"
     prompt = ROUTER_PROMPT.replace("QUESTION_HERE", (f"Earlier: {memory}\n" if memory else "") + f"Question: {question}")
     pending = {_pool.submit(_classify, "router", prompt): "Phi-4-mini"}
     route, who, hedged = None, None, False
@@ -319,6 +328,8 @@ def _route(question, memory):
             hedged = True
     if route is None:
         route, who = _rules(question), "keyword rules (models too slow)"
+    elif len(_routes) < 5000:
+        _routes[key] = (dict(route), who)
     CTX.get()["trace"].append({"agent": f"Router ({who})", "detail": f"{route}" + (" · hedged after 2.5 s" if hedged else ""),
                                "ms": round((time.perf_counter() - t0) * 1000)})
     return route, who
@@ -367,7 +378,7 @@ def _analyst():
     client = OpenAIChatCompletionClient(model=ai.deployment("chat"), credential=ai.credential(),
                                         azure_endpoint=ai.endpoint(), api_version=ai.API_VERSION)
     return Agent(client, ANALYST_PROMPT, name="analyst", tools=[tool(_off_loop(f)) for f in TOOLS],
-                 default_options={"temperature": 0})  # same question, same advice
+                 default_options={"temperature": 0, "seed": 7})  # same question, same advice (best effort)
 
 
 def _off_loop(f):
@@ -384,6 +395,18 @@ async def _analyse(prompt, session=None):
     CTX.get()["trace"].append({"agent": "Analyst (gpt-4.1-mini, Agent Framework)", "detail": "drafted answer",
                                "ms": round((time.perf_counter() - t0) * 1000)})
     return resp.text.strip()
+
+
+FACES = {"RW": ["LB"], "LW": ["RB"], "RB": ["LW"], "LB": ["RW"], "RCM": ["LCM"], "LCM": ["RCM"], "CDM": ["CDM"],
+         "ST": ["RCB", "LCB"]}  # teams face each other, so a right-sided player meets the opponent's left side
+
+
+def matchups(plan_team):
+    """Direct opponents as facts, so the analyst never has to mirror flanks itself."""
+    other = "away" if plan_team == "home" else "home"
+    ours = {r: p for p, r in squad(plan_team).items()}
+    return "Direct opponents (their right side meets our left side): " + "; ".join(
+        f"their {p} ({r}) vs our {' and '.join(f'{ours[x]} ({x})' for x in FACES[r])}" for p, r in squad(other).items() if r in FACES)
 
 
 SUB_VERB = re.compile(r"\b(take|taking|bring|bringing|sub|subbing|substitut\w*|replac\w*|withdraw\w*|hook\w*)\b", re.I)
@@ -409,6 +432,39 @@ def advice_issues(answer):
     return list(dict.fromkeys(issues))
 
 
+def _by(agent, n):
+    """Relabel the last n trace entries: tool calls made by the orchestrator or verifier, not the analyst."""
+    for s in CTX.get()["trace"][-n:]:
+        s["agent"] = f"{agent} → tool"
+
+
+SUB_MAX_COST = 10  # % of teammates' connectivity a substitution may cost before it is not recommended
+
+
+def _gather_substitution(plan_team, named):
+    """Squad assessment plus the what-if for every substitution candidate and every outfield player named."""
+    sq = squad_assessment(TEAMS[plan_team]["name"])
+    names = [c["player"] for c in sq["substitution_candidates"]]
+    names += [p for p in named if p not in names and squad(_find_player(p)[0] or plan_team).get(p) != "GK"]
+    out = [sq] + [what_if_remove(p) for p in names]
+    _by("Orchestrator", len(out))
+    # The decision is a rule the coach can audit, not the model's tie-break between candidates
+    cost = {w["player"]: int(w["teammates_connectivity_lost"].rstrip("%")) for w in out[1:] if "error" not in w}
+    pick = next((c["player"] for c in sq["substitution_candidates"] if cost.get(c["player"], 100) < SUB_MAX_COST), None)
+    decision = {"recommended_substitution": pick or f"none: every candidate's removal costs {SUB_MAX_COST}%+ of teammates' connectivity",
+                "rule": f"lowest recent plan fit (fading counts 10 points against) among candidates whose removal costs under "
+                        f"{SUB_MAX_COST}% of teammates' connectivity"}
+    CTX.get()["outputs"].append(decision)
+    return [decision] + out
+
+
+def _run_skipped_whatifs(issues):
+    names = [m.group(1) for i in issues if (m := re.match(r"(.+) is a key player in the plan; call what_if_remove", i))]
+    out = [what_if_remove(p) for p in names]
+    _by("Verifier", len(out))
+    return out
+
+
 def _fallback():
     """Deterministic answer straight from the tool outputs: always true, never fluent."""
     outs = [o for o in CTX.get()["outputs"] if "error" not in o] or [match_state()]
@@ -431,7 +487,7 @@ async def ask(question, events, minute, seed, language="English", history=(), pl
     memory = await asyncio.to_thread(_memory, question, list(history)[-6:]) if history else []
     calls += bool(history)
     route, who = await asyncio.to_thread(_route, question, " | ".join(memory))
-    calls += 1 + ("hedge" in who)
+    calls += 0 if who.startswith("cached") else 1 + ("hedge" in who)
     if route["intent"] == "off_topic" or route["confidence"] < 0.35:
         ctx["trace"].append({"agent": "Gate", "detail": f"intent={route['intent']}, confidence={route['confidence']}: no analyst call", "ms": 0})
         msg = ("I can only answer questions about this match and your game plan: try 'Who should I take off?', "
@@ -442,11 +498,19 @@ async def ask(question, events, minute, seed, language="English", history=(), pl
     from agent_framework import AgentSession
     session = AgentSession()
     lineups = "; ".join(f"{TEAMS[t]['name']}: " + ", ".join(f"{p} ({r})" for p, r in squad(t).items()) for t in TEAMS)
+    lineups += ". " + matchups(plan_team)
     prompt = (f"Match minute: {minute}. The coach's team: {TEAMS[plan_team]['name']} ('our', 'we' and 'us' mean them). "
               f"Line-ups (role codes: GK keeper, RB/LB full-backs, RCB/LCB centre-backs, CDM holding midfielder, "
               f"RCM/LCM central midfielders, RW/LW wingers, ST striker): {lineups}.\n"
               f"Router: intent={route['intent']}, team={route['team']}, players={route['players']}.\n"
               + (f"Relevant earlier conversation: {' | '.join(memory)}\n" if memory else "") + f"Question: {question}")
+    if route["intent"] == "substitution" or SUB_VERB.search(question):
+        # Substitution advice must rest on the counterfactual: gather it deterministically instead of hoping the model asks
+        gathered = await asyncio.to_thread(_gather_substitution, plan_team, route["players"])
+        prompt += (f"\nData already gathered for this substitution question (use it; call tools for anything else): {json.dumps(gathered)}"
+                   "\nThe first item is the rule-based recommendation: lead with recommended_substitution and its reasons from "
+                   "the data, then any caveats. Do not pick a different player; if the coach asked about someone else, "
+                   "answer that and mention the recommended option.")
     answer = await _analyse(prompt, session)
     calls += 1
     issues = grounding.check(answer, *ctx["outputs"], question, str(minute)) + advice_issues(answer)
@@ -455,13 +519,16 @@ async def ask(question, events, minute, seed, language="English", history=(), pl
     ctx["trace"].append({"agent": "Verifier", "detail": "passed" if not issues else "; ".join(issues), "ms": 0})
     source = "ai"
     if issues:  # self-reflection: one rewrite with the verifier's critique
+        repaired = await asyncio.to_thread(_run_skipped_whatifs, issues)  # deterministic repair, not a request to remember
         answer = await _analyse("The verifier rejected your answer: " + "; ".join(issues) + ". Rewrite it using only "
-                                "numbers and directions exactly as the tools returned them (call tools if needed).", session)
+                                "numbers and directions exactly as the tools returned them (call tools if needed)."
+                                + (f" Results of the what_if_remove checks you skipped: {json.dumps(repaired)}" if repaired else ""), session)
         calls += 1
         issues = grounding.check(answer, *ctx["outputs"], question, str(minute)) + advice_issues(answer)
         if not ctx["outputs"]:
             issues.append("no tool was called")
-        ctx["trace"].append({"agent": "Verifier", "detail": "passed after rewrite" if not issues else "failed again -> deterministic answer", "ms": 0})
+        ctx["trace"].append({"agent": "Verifier", "detail": "passed after rewrite" if not issues else
+                             "failed again -> deterministic answer: " + "; ".join(issues), "ms": 0})
         if issues:
             answer, source = _fallback(), "deterministic (verifier fallback)"
         else:

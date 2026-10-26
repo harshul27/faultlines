@@ -440,7 +440,8 @@ async def run_agents():
         t0 = time.perf_counter()
         out = await agents.ask(q, ev, 70, 23, "English", (), None, "home")
         used = {s["tool"] for s in out["trace"] if s.get("tool")}
-        violations = agents.advice_issues(out["answer"]) if used else []
+        # The guard judges model-written advice; a deterministic fallback is raw tool data, not advice
+        violations = agents.advice_issues(out["answer"]) if used and out["source"].startswith("ai") else []
         guard += bool(violations)
         ok_tools = (not tools and out["source"] == "router (gated)") or bool(tools & used)
         ok_must = must is None or bool(re.search(must, out["answer"], re.I))
@@ -452,16 +453,31 @@ async def run_agents():
                      "guard": violations, "judge": judge.get("score"), "judge_reason": judge.get("reason"),
                      "seconds": round(time.perf_counter() - t0, 1), "answer": out["answer"]})
         print(f"  {q[:50]:50} tools={'ok' if ok_tools else 'MISS'} judge={judge.get('score')} {rows[-1]['seconds']}s", flush=True)
-    same = []
+    same, same_rec = [], []
     for q in REPEAT:
         a = [(await agents.ask(q, ev, 70, 23, "English", (), None, "home"))["answer"] for _ in range(2)]
         e1, e2 = _entities(a[0]), _entities(a[1])
         same.append(len(e1 & e2) / max(1, len(e1 | e2)) >= 0.6)
-    return rows, guard, float(np.mean(same))
+        same_rec.append(_recommendation(a[0]) == _recommendation(a[1]))
+    return rows, guard, float(np.mean(same)), float(np.mean(same_rec))
+
+
+def _recommendation(answer):
+    """The first player or channel named in the recommending sentence (else the last sentence): the advice itself."""
+    sentences = re.split(r"(?<=[.!?])\s+", answer.strip())
+    s = next((x for x in sentences if re.search(r"recommend|suggest|should|focus", x, re.I)), sentences[-1])
+    words = [p.split()[-1] for t in TEAMS for p in TEAMS[t]["players"]] + ["left", "right", "centre", "center"]
+    cue = re.search(r"recommend|suggest|should|focus", s, re.I)
+    after = s[cue.end():] if cue and cue.end() < len(s) else s  # the advice follows the verb ("..., I recommend substituting X")
+    names = [(m.start(), m.group(0)) for n in words for m in re.finditer(rf"\b{n}\b", after, re.I)] or \
+            [(m.start(), m.group(0)) for n in words for m in re.finditer(rf"\b{n}\b", s, re.I)]
+    if not names:  # the recommending sentence names nobody ("he"): use the first player/channel in the answer
+        names = [(m.start(), m.group(0)) for n in words for m in re.finditer(rf"\b{n}\b", answer, re.I)]
+    return min(names)[1].lower() if names else ""
 
 
 def test_agents():
-    rows, guard, consistency = asyncio.run(run_agents())
+    rows, guard, consistency, consistency_rec = asyncio.run(run_agents())
     n = len(rows)
     tool_rate = np.mean([r["tools_ok"] and r["mention_ok"] for r in rows])
     fallback = np.mean([r["source"].startswith("deterministic") for r in rows])
@@ -476,6 +492,10 @@ def test_agents():
                f"{fallback:.0%}", "Fallback = the analyst failed the fact-check twice.", scope),
         result("Agents: same question, same advice", consistency >= BARS["agent_consistency"], f">= {BARS['agent_consistency']:.0%} of repeated questions name the same players/channels",
                f"{consistency:.0%} of {len(REPEAT)}", "Each question asked twice; players and channels named must overlap >= 60%.", scope),
+        result("Agents: same recommendation (added after run 4)", consistency_rec >= BARS["agent_consistency"],
+               f">= {BARS['agent_consistency']:.0%} of repeated questions lead with the same player/channel",
+               f"{consistency_rec:.0%} of {len(REPEAT)}", "The test above also counts supporting names; this compares only the advice itself "
+               "(first player or channel named in the recommending sentence). Reported alongside, not instead.", scope),
         result("Agents: answer quality (model judge)", judge >= BARS["agent_judge"], f"mean >= {BARS['agent_judge']} / 5",
                f"{judge:.1f} / 5", "gpt-4.1-mini grades each answer against its own trace. A model judging a model: a screen, not proof; spot-check by hand.",
                "Real coaches should grade a sample before trusting this."),
@@ -504,7 +524,30 @@ HISTORY = """## What changed between runs (no pass bar was changed)
   * Consistency 33%: the analyst ran at default temperature. Fix: temperature 0.
   * The AI plan reader missed negations the rules handle. Fix: prompt rule + the rules' negation detector as a
     deterministic guard on the model's reading (`gameplan.drop_negated`). The reader cases were not changed.
-* **Run 4** (this report): after those fixes.
+* **Run 4** ([evaluation-run4.md](evaluation-run4.md)): after those fixes, 10 of 19 passed.
+  * Agents put our right-back on Riverside's right winger (it is our left-back). Fix: direct opponents given as facts
+    in every request (`agents.matchups`), and zone reports state their frame.
+  * Repeated questions: the core advice was already stable at temperature 0; differences came from the router race
+    (Phi-4-mini and the gpt-4.1-mini hedge can label a question differently, and which wins depends on latency) and
+    from supporting names. Fix: same question, same route (`agents._routes`), and a fixed seed for the analyst.
+    A second consistency measure (the recommendation itself) was added and is reported alongside the original.
+* **Run 5** ([evaluation-run5.md](evaluation-run5.md), `--only-ai`): tools 92% (pass), quality 4.8/5; guard 1, consistency 67% / 33%.
+  * The one guard 'violation' was a deterministic fallback (raw tool data containing the field name
+    `substitution_candidates`), not advice: an error in the test. Fix: the guard judges model-written answers only.
+  * The recommendation extractor returned sentence text when the recommending sentence named nobody ("he remains
+    the most effective"): an error in the new metric. Fix: fall back to the first player/channel in the answer.
+  * Real cause of unstable answers: the guard itself. The analyst recommended taking off Ferrand without the what-if,
+    the rewrite sometimes failed, and the answer fell back to raw data. Fix: for substitution questions the
+    orchestrator gathers the squad assessment and the what-ifs before the analyst writes; if the guard still catches
+    a skipped what-if, the verifier runs it and passes the result into the rewrite.
+* **Run 6** ([evaluation-run6.md](evaluation-run6.md), `--only-ai`): guard 0, fallbacks 0%, tools 92%; consistency 67% / 67%.
+  * "Who should I take off?" asked three times named three different players from identical data: the data listed
+    candidates without choosing, and the model broke the tie differently each time. Fix: a rule the coach can audit
+    makes the choice (`agents.SUB_MAX_COST`: lowest recent plan fit, fading counts against, among candidates whose
+    removal costs under 10% of teammates' connectivity); the analyst explains it.
+  * The recommendation extractor took the first name in the sentence ("Given Pike's importance..., I recommend
+    substituting Luca Ferrand" -> Pike): an error in the metric. Fix: names after the recommending verb first.
+* **Run 7** (this report): agents and AI plan reader rerun after those fixes (`--only-ai`); offline results carried over from run 4.
 """
 
 REAL_DATA = """## Still needs real data (protocols, fixed in advance)
@@ -550,13 +593,37 @@ def main():
     ap.add_argument("--ai", action="store_true")
     ap.add_argument("--quick", action="store_true", help="fewer matches (smoke test)")
     ap.add_argument("--calibrate", action="store_true", help="print alert thresholds from seeds 7000+ and stop")
+    ap.add_argument("--only-ai", action="store_true", help="rerun the AI tests; keep the offline results of the last run")
     args = ap.parse_args()
     if args.calibrate:
         calibrate(range(7000, 7040))
         return
     n = 12 if args.quick else 60
-    tests, raw, t0 = [], {}, time.time()
+    t0 = time.time()
     stage = lambda name: print(f"[{time.time() - t0:5.0f}s] {name}", flush=True)
+    if args.only_ai:
+        prev = json.loads((ROOT / "reports/evaluation.json").read_text(encoding="utf-8"))
+        tests = [t for t in prev["tests"] if not t["test"].startswith(("Agents", "Plan reader (gpt"))]
+        raw = {k: v for k, v in prev["raw"].items() if k != "agents"}
+        raw["reader_fails"] = {"rules": raw.get("reader_fails", {}).get("rules", [])}
+        args.ai = True
+    else:
+        tests, raw = offline(n, stage)
+    if args.ai:
+        rate, fails = score_reader(lambda text: gp.parse(text, "home")[0])
+        raw["reader_fails"]["ai"] = fails
+        tests.append(result("Plan reader (gpt-4.1-mini)", rate >= BARS["reader_ai"], f">= {BARS['reader_ai']:.0%} of checks",
+                            f"{rate:.0%} of {sum(len(c) for _, c in READER_CASES)} checks", "Same cases as the rules.",
+                            "Language understanding: independent of the match data. Real coaches' plans are the real test."))
+        stage("agents")
+        t, raw["agents"] = test_agents()
+        tests += t
+    write(tests, raw, args.ai)
+    stage(f"done: {sum(t['passed'] for t in tests)}/{len(tests)} passed -> reports/evaluation.md")
+
+
+def offline(n, stage):
+    tests, raw = [], {}
     stage("fault lines")
     t, raw["fragility"] = test_fragility(range(2000, 2000 + n))
     tests += t
@@ -579,17 +646,7 @@ def main():
     tests.append(result("Plan reader (keyword rules)", rate >= BARS["reader_rules"], f">= {BARS['reader_rules']:.0%} of checks",
                         f"{rate:.0%} of {sum(len(c) for _, c in READER_CASES)} checks", "Negations, opponent instructions, sheets, other languages, emphasis.",
                         "Language understanding: independent of the match data."))
-    if args.ai:
-        rate, fails = score_reader(lambda text: gp.parse(text, "home")[0])
-        raw["reader_fails"]["ai"] = fails
-        tests.append(result("Plan reader (gpt-4.1-mini)", rate >= BARS["reader_ai"], f">= {BARS['reader_ai']:.0%} of checks",
-                            f"{rate:.0%} of {sum(len(c) for _, c in READER_CASES)} checks", "Same cases as the rules.",
-                            "Language understanding: independent of the match data. Real coaches' plans are the real test."))
-        stage("agents")
-        t, raw["agents"] = test_agents()
-        tests += t
-    write(tests, raw, args.ai)
-    stage(f"done: {sum(t['passed'] for t in tests)}/{len(tests)} passed -> reports/evaluation.md")
+    return tests, raw
 
 
 if __name__ == "__main__":

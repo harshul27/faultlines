@@ -1,0 +1,676 @@
+{
+ "tests": [
+  {
+   "test": "Fault lines: predicted connectivity loss happens (added after run 2)",
+   "passed": false,
+   "bar": "95% CI of Spearman rho(fragility, realised spread lost) above 0",
+   "result": "rho -0.598 (CI -0.629 to -0.563); mean realised spread lost -20.8%",
+   "note": "Fragility is a static what-if on the network; this checks the remaining players' actual passing network after the removal.",
+   "what_it_shows": "Tests the claim on its own terms in a system that re-routes play. Whether lost connectivity costs results is the real-data question."
+  },
+  {
+   "test": "Fault lines: fragility predicts progression lost when a player goes off",
+   "passed": false,
+   "bar": "95% CI of Spearman rho above 0",
+   "result": "rho -0.083 (CI -0.132 to -0.032), 1200 paired removals",
+   "note": "Each pair: same match, same first hour, player removed at 60'. Outcome: progressive passes 60-95' lost. Mean progression lost per removal: -0.2 passes: the generator does not make losing a player costly (10 men re-route the ball), so this outcome cannot test any predictor.",
+   "what_it_shows": "The measure finds structurally important players in a passing system with no planted answer. Real football adds tactics, substitutes and opponents adapting: needs the injury/red-card study."
+  },
+  {
+   "test": "Fault lines: beyond position",
+   "passed": false,
+   "bar": "95% CI of within-position rho above 0",
+   "result": "rho 0.014 (CI -0.025 to 0.058)",
+   "note": "Predictor and outcome centred by position, so 'midfielders matter more' does not count.",
+   "what_it_shows": "Same as above."
+  },
+  {
+   "test": "Fault lines: better than counting passes",
+   "passed": false,
+   "bar": "95% CI of rho(fragility) - rho(passes) not below 0",
+   "result": "fragility -0.083 vs passes -0.109 vs betweenness -0.069 (difference CI -0.011 to 0.066)",
+   "note": "If a plain pass count predicts as well, fragility's extra complexity is not earning its place.",
+   "what_it_shows": "Same as above."
+  },
+  {
+   "test": "Plan fit: robust to the exact weights",
+   "passed": true,
+   "bar": "median tau >= 0.8, 5th percentile >= 0.6",
+   "result": "median 0.93, 5th percentile 0.84 (4000 perturbations)",
+   "note": "Every weight multiplied by a random 0.5-1.5. A low tau would mean the ranking is mostly my weight choices.",
+   "what_it_shows": "Holds for any data: this is a property of the scoring, not of football."
+  },
+  {
+   "test": "Plan fit: early reads hold up",
+   "passed": true,
+   "bar": "same side of 50 as the 90' read: 30' >= 65%, 45' >= 75%",
+   "result": "20': 68% (rho 0.458), 30': 71% (rho 0.584), 45': 77% (rho 0.708), 60': 83% (rho 0.822)",
+   "note": "Checks that the minutes adjustment keeps early verdicts from flipping later.",
+   "what_it_shows": "Real players vary more between halves (tactics, fatigue, game state), so expect lower agreement on real data."
+  },
+  {
+   "test": "Plan fit: reliable within a match",
+   "passed": false,
+   "bar": "first vs second half rho >= 0.4",
+   "result": "rho 0.06 over 1320 player-halves",
+   "note": "A score that changes completely between halves is measuring noise, not the player.",
+   "what_it_shows": "In synthetic matches players have no lasting individual quality beyond position and team strength, so this is a floor; real players should be more consistent."
+  },
+  {
+   "test": "Flags: not too many, not too few",
+   "passed": true,
+   "bar": "0.2-2.5 alert flags per team per check",
+   "result": "neutral matches 1.74, storyline matches 1.62",
+   "note": "Too many flags and coaches stop reading them.",
+   "what_it_shows": "Rates will shift on real data; retune the 1.5x / 0.6x / 12-point thresholds there."
+  },
+  {
+   "test": "Flags: 'fading' predicts the next 15 minutes",
+   "passed": false,
+   "bar": "95% CI of the fading effect below 0, controlling for the current 15-minute fit",
+   "result": "neutral: 1.7 (CI 0.01 to 3.54, 118 flags); storyline: -1.64 (CI -3.09 to -0.28, 133 flags)",
+   "note": "Next-15 fit regressed on current fit + the flag. Without the flag adding information, it is regression to the mean dressed up as insight. Reading: where a real decline exists (storyline: man-marked from 60') the flag carries information (-1.64); in ordinary play flagged players bounce back (+1.7), so a single 'fading' flag should be read as a dip, not a trend.",
+   "what_it_shows": "The generator has no fatigue, so in neutral matches nothing real can fade; the storyline match (man-marking from 60') is the only true decline. Real test: tracking data (high-speed running) and coach substitutions."
+  },
+  {
+   "test": "Key-moment cues: informative, not spammy",
+   "passed": true,
+   "bar": "median 2-10 non-goal cues per match, none above 20",
+   "result": "neutral median 3 (range 0-6); storyline median 3",
+   "note": "Counts fault-line shifts, alerts and narrowing per match.",
+   "what_it_shows": "Precision (are they the moments an analyst would pick?) needs analyst labels on real matches."
+  },
+  {
+   "test": "Expected points added tracks results",
+   "passed": false,
+   "bar": "rho(xPA margin, points) >= 0.3",
+   "result": "rho 0.05 (xG margin: 0.40) over 240 matches",
+   "note": "Run 1 finding: xPA weights chances by what a goal is worth then, so a trailing team's chances count more and the margin does not track who won. It measures decisive moments, not dominance: use the xG margin for dominance.",
+   "what_it_shows": "By construction it inherits xG quality; on real data use the provider's xG."
+  },
+  {
+   "test": "Expected points added beats old clutch points (added after run 1)",
+   "passed": true,
+   "bar": "rho(xPA, realised points added) > rho(old clutch points, realised)",
+   "result": "xPA 0.60 vs clutch points -0.02 over 5280 player-matches",
+   "note": "Realised points added = goals (scorer and assister) x the points a goal was worth at that moment.",
+   "what_it_shows": "In synthetic data xG is the true scoring probability, which favours xPA; real xG is an estimate."
+  },
+  {
+   "test": "Plan reader (keyword rules)",
+   "passed": true,
+   "bar": ">= 70% of checks",
+   "result": "76% of 29 checks",
+   "note": "Negations, opponent instructions, sheets, other languages, emphasis.",
+   "what_it_shows": "Language understanding: independent of the match data."
+  },
+  {
+   "test": "Plan reader (gpt-4.1-mini)",
+   "passed": true,
+   "bar": ">= 90% of checks",
+   "result": "93% of 29 checks",
+   "note": "Same cases as the rules.",
+   "what_it_shows": "Language understanding: independent of the match data. Real coaches' plans are the real test."
+  },
+  {
+   "test": "Agents: right tools and content",
+   "passed": true,
+   "bar": ">= 90% of 26 coach questions",
+   "result": "92%",
+   "note": "Each question lists the tools a good answer needs and, where relevant, what it must mention.",
+   "what_it_shows": "Tests the agent layer as it would run on real data: the tools change, the orchestration doesn't."
+  },
+  {
+   "test": "Agents: coaching guard holds",
+   "passed": true,
+   "bar": "0 final answers recommending a key player off unchecked, or the keeper off",
+   "result": "0 violations",
+   "note": "Deterministic check on the final answer (after the self-correcting rewrite).",
+   "what_it_shows": "Tests the agent layer as it would run on real data: the tools change, the orchestration doesn't."
+  },
+  {
+   "test": "Agents: verified answers, rarely the fallback",
+   "passed": true,
+   "bar": "<= 10% deterministic fallbacks",
+   "result": "0%",
+   "note": "Fallback = the analyst failed the fact-check twice.",
+   "what_it_shows": "Tests the agent layer as it would run on real data: the tools change, the orchestration doesn't."
+  },
+  {
+   "test": "Agents: same question, same advice",
+   "passed": false,
+   "bar": ">= 80% of repeated questions name the same players/channels",
+   "result": "67% of 6",
+   "note": "Each question asked twice; players and channels named must overlap >= 60%.",
+   "what_it_shows": "Tests the agent layer as it would run on real data: the tools change, the orchestration doesn't."
+  },
+  {
+   "test": "Agents: same recommendation (added after run 4)",
+   "passed": false,
+   "bar": ">= 80% of repeated questions lead with the same player/channel",
+   "result": "67% of 6",
+   "note": "The test above also counts supporting names; this compares only the advice itself (first player or channel named in the recommending sentence). Reported alongside, not instead.",
+   "what_it_shows": "Tests the agent layer as it would run on real data: the tools change, the orchestration doesn't."
+  },
+  {
+   "test": "Agents: answer quality (model judge)",
+   "passed": true,
+   "bar": "mean >= 4.0 / 5",
+   "result": "4.8 / 5",
+   "note": "gpt-4.1-mini grades each answer against its own trace. A model judging a model: a screen, not proof; spot-check by hand.",
+   "what_it_shows": "Real coaches should grade a sample before trusting this."
+  }
+ ],
+ "raw": {
+  "fragility": {
+   "fragility": {
+    "rho": -0.083,
+    "ci": [
+     -0.132,
+     -0.032
+    ],
+    "within_role": 0.014,
+    "within_ci": [
+     -0.025,
+     0.058
+    ]
+   },
+   "passes": {
+    "rho": -0.109,
+    "ci": [
+     -0.168,
+     -0.046
+    ],
+    "within_role": -0.006,
+    "within_ci": [
+     -0.067,
+     0.065
+    ]
+   },
+   "betweenness": {
+    "rho": -0.069,
+    "ci": [
+     -0.124,
+     -0.018
+    ],
+    "within_role": 0.026,
+    "within_ci": [
+     -0.014,
+     0.065
+    ]
+   },
+   "fragility_minus_passes_ci": [
+    -0.011,
+    0.066
+   ],
+   "pairs": 1200,
+   "mean_progression_lost": -0.2,
+   "connectivity": {
+    "rho": -0.598,
+    "ci": [
+     -0.629,
+     -0.563
+    ],
+    "mean_spread_lost": -0.208
+   }
+  },
+  "plan_fit": {
+   "weights_tau": {
+    "median": 0.935,
+    "p5": 0.838,
+    "n": 4000
+   },
+   "early_reads": {
+    "20": {
+     "same_side": 0.682,
+     "rho": 0.458
+    },
+    "30": {
+     "same_side": 0.712,
+     "rho": 0.584
+    },
+    "45": {
+     "same_side": 0.77,
+     "rho": 0.708
+    },
+    "60": {
+     "same_side": 0.83,
+     "rho": 0.822
+    }
+   },
+   "split_half_rho": 0.056
+  },
+  "flags": {
+   "alerts_per_check_neutral": 1.74,
+   "alerts_per_check_storyline": 1.62,
+   "fading_neutral": {
+    "coef": 1.7,
+    "ci": [
+     0.01,
+     3.54
+    ],
+    "flagged": 118,
+    "rows": 3960
+   },
+   "fading_storyline": {
+    "coef": -1.64,
+    "ci": [
+     -3.09,
+     -0.28
+    ],
+    "flagged": 133,
+    "rows": 3960
+   }
+  },
+  "cues": {
+   "neutral": {
+    "median": 3.0,
+    "max": 6,
+    "min": 0
+   },
+   "storyline": {
+    "median": 3.0,
+    "max": 6,
+    "min": 0
+   }
+  },
+  "xpa": {
+   "rho": 0.054275664999030866,
+   "rho_xg": 0.398273338004693,
+   "rho_xpa_realised": 0.6012404135459548,
+   "rho_clutch_realised": -0.018609492956222957
+  },
+  "reader_fails": {
+   "rules": [
+    "'Everything goes through Ferrand.': expected has network_share for Luca Ferrand",
+    "'Their striker Lindqvist is dangerous; our centre-backs must ': expected has recoveries for Rui Calder",
+    "'Their striker Lindqvist is dangerous; our centre-backs must ': expected has recoveries for Jonah Pike",
+    "'Ashgrove: lead the line and finish the chances. Top priority': expected rel>= 5 for Theo Ashgrove",
+    "'Todo pasa por Ferrand: \u00e9l marca el ritmo del partido.': expected has network_share for Luca Ferrand",
+    "\"We don't need to dominate possession; let them have the ball\": expected lacks completion for team",
+    "\"We don't need to dominate possession; let them have the ball\": expected has progressive for team"
+   ],
+   "ai": [
+    "'Full-backs stay deep and safe, no overlapping.': expected has completion for Eli Mensah",
+    "'Todo pasa por Ferrand: \u00e9l marca el ritmo del partido.': expected has network_share for Luca Ferrand"
+   ]
+  },
+  "agents": [
+   {
+    "question": "Who should I take off?",
+    "tools": [
+     "squad_assessment",
+     "what_if_remove"
+    ],
+    "tools_ok": true,
+    "mention_ok": true,
+    "source": "ai",
+    "guard": [],
+    "judge": 5,
+    "judge_reason": "The answer directly addresses who to take off using the provided data, evaluates each candidate's relevance and condition, and sensibly recommends substituting Luca Ferrand to refresh the midfield.",
+    "seconds": 9.7,
+    "answer": "Among the substitution candidates, Luca Ferrand is highly relevant to the plan (5/5) but is fading and overloaded, with a plan fit last 15 minutes of 44. Theo Ashgrove, also highly relevant (5/5), has a low plan fit last 15 minutes of 43 and is bypassed, with concerns about pass completion. Rafa Quinlan is less relevant (3/5), off plan, and has not created expected chances, with a plan fit last 15 minutes of 44. Given Ferrand's overload and fading form, he is the best candidate to take off to refresh the midfield and reduce the load. I recommend substituting Luca Ferrand."
+   },
+   {
+    "question": "Is our game plan working?",
+    "tools": [
+     "plan_execution"
+    ],
+    "tools_ok": true,
+    "mention_ok": true,
+    "source": "ai",
+    "guard": [],
+    "judge": 5,
+    "judge_reason": "The answer directly assesses the game plan's effectiveness using provided data and offers a clear, sensible recommendation to improve the wingers' pressing and chance creation.",
+    "seconds": 4.4,
+    "answer": "Our overall game plan execution is at 56, which is slightly above the league norm but shows room for improvement. The key principle of controlling the game through patient possession is mixed, with Luca Ferrand excelling but Sami Okafor struggling. Luca Ferrand is doing very well as the midfield pivot, executing his role at 95, which is working well. However, the wingers' role, crucial for creating chances and pressing high, is not working effectively, scoring only 36. I recommend focusing on improving the wingers' pressing and chance creation, especially Rafa Quinlan's involvement, to better support the attack."
+   },
+   {
+    "question": "How is Owen Brightwell doing against the plan?",
+    "tools": [
+     "assess_player"
+    ],
+    "tools_ok": true,
+    "mention_ok": true,
+    "source": "ai",
+    "guard": [],
+    "judge": 5,
+    "judge_reason": "The answer directly assesses Owen Brightwell's performance against the plan using the provided data and offers a clear, sensible recommendation to improve his effectiveness under pressure.",
+    "seconds": 6.0,
+    "answer": "Owen Brightwell is doing well against the plan with a plan fit of 57 overall and improving to 62 in the last 15 minutes, showing steady form. He is overloaded, meaning the team relies on him more than intended, with a load share of 15% compared to the expected 10%. He has completed more passes than expected and created more chances, but his pass completion under pressure is low at 43% versus the role norm of 67%. To support him better, we should consider giving him more passing options or reducing his pressure. I recommend encouraging teammates to offer more passing outlets to Owen to improve his pass completion under pressure."
+   },
+   {
+    "question": "Where should we attack?",
+    "tools": [
+     "zone_report"
+    ],
+    "tools_ok": true,
+    "mention_ok": true,
+    "source": "ai",
+    "guard": [],
+    "judge": 4,
+    "judge_reason": "The answer uses the data effectively to recommend attacking through the center, but it overlooks the risk of losing the ball frequently in that area, which could be addressed for a more balanced recommendation.",
+    "seconds": 5.3,
+    "answer": "Northbridge FC has made most of its final third entries through the center (28) compared to the left (9) and right (5) flanks. However, the team has not taken any shots from the left side and only a few from the right, with most shots coming from the center. The team also loses the ball most frequently in the middle and final thirds through the center. Given this, it would be strategic to focus attacks more through the center where the team is already active and has better shot opportunities. I recommend concentrating the attack through the central channel to maximize scoring chances."
+   },
+   {
+    "question": "Where are we losing the ball?",
+    "tools": [
+     "zone_report"
+    ],
+    "tools_ok": true,
+    "mention_ok": true,
+    "source": "ai",
+    "guard": [],
+    "judge": 5,
+    "judge_reason": "The answer directly addresses where the ball is lost using the provided data and offers a clear, sensible tactical recommendation to improve ball retention in the identified problem area.",
+    "seconds": 8.7,
+    "answer": "Northbridge FC is losing the ball mostly in the middle third, especially in the center with 27 losses, followed by 10 losses in the final third center and 9 losses in the middle third right. The left side in the middle third has fewer losses at 5. To reduce ball losses, we should focus on improving ball retention and decision-making in the central middle third area. I recommend instructing the midfielders to be more cautious and support each other better in that zone."
+   },
+   {
+    "question": "Who is carrying too much load?",
+    "tools": [
+     "squad_assessment",
+     "what_if_remove"
+    ],
+    "tools_ok": true,
+    "mention_ok": true,
+    "source": "ai (self-corrected)",
+    "guard": [],
+    "judge": 5,
+    "judge_reason": "The answer directly identifies Luca Ferrand as carrying too much load based on pass distribution data and sensibly recommends substituting him to reduce overload while preserving key players.",
+    "seconds": 9.8,
+    "answer": "Removing Luca Ferrand would lose 20% of passes through him, affecting Owen Brightwell (4 passes), Jonah Pike (2 passes), and Milo Dancy (2 passes). Removing Jonah Pike would lose 15% of passes through him, affecting Luca Ferrand (2 passes), Rafa Quinlan (2 passes), and Kai Andersen (2 passes). Since Jonah Pike is a key player in the plan and his removal affects important partners, I recommend substituting Luca Ferrand to reduce overload while preserving the team's core structure."
+   },
+   {
+    "question": "Is our press working?",
+    "tools": [
+     "plan_execution"
+    ],
+    "tools_ok": true,
+    "mention_ok": true,
+    "source": "ai",
+    "guard": [],
+    "judge": 5,
+    "judge_reason": "The answer directly addresses the question by analyzing pressing effectiveness using the given data and provides a clear, sensible recommendation to improve pressing intensity and ball recoveries from specific players.",
+    "seconds": 4.6,
+    "answer": "Our press is not working well overall, with the principle for wingers to create chances and counter-press to win the ball back high scoring only 36 and marked as \"not working.\" This is a concern since it affects ball recoveries and chances created from pressing. Other principles related to possession and build-up are mixed or working, but the pressing intensity and effectiveness from the wide players need improvement. I recommend focusing on increasing pressing intensity and ball recoveries from the wingers, especially Rafa Quinlan on the left."
+   },
+   {
+    "question": "What does the plan ask of Ferrand, and is he doing it?",
+    "tools": [
+     "assess_player",
+     "game_plan"
+    ],
+    "tools_ok": true,
+    "mention_ok": true,
+    "source": "ai",
+    "guard": [],
+    "judge": 5,
+    "judge_reason": "The answer directly addresses the plan's requirements for Ferrand, uses the provided data on his load and performance, and sensibly recommends managing his workload to maintain effectiveness.",
+    "seconds": 6.3,
+    "answer": "The plan asks Luca Ferrand to be the key player at the base of midfield, dictating the tempo and connecting the back line to the attack, with a very high relevance of 5/5. He is currently overloaded, with a load share of 23% compared to the expected 15%, and his plan fit has dropped from 84 to 44 in the last 15 minutes, indicating he is fading in form. Despite this, he has a very high share of passing connectivity and completed passes, showing he is still central to the team's play. I recommend giving Ferrand a short breather or support to reduce his load and help him regain influence."
+   },
+   {
+    "question": "What happens if Ferrand is marked out of the game?",
+    "tools": [
+     "what_if_remove"
+    ],
+    "tools_ok": true,
+    "mention_ok": true,
+    "source": "ai",
+    "guard": [],
+    "judge": 5,
+    "judge_reason": "The answer directly addresses the impact of marking out Ferrand using the provided data and offers a clear tactical recommendation to use Theo Ashgrove as an alternative passing route.",
+    "seconds": 7.9,
+    "answer": "If Luca Ferrand is marked out of the game, Northbridge FC would lose 20% of their passes in the last 15 minutes, as 12 of 59 passes went through him. However, the team's overall connectivity would not be significantly disrupted (0% connectivity lost), and Theo Ashgrove would become the new fault line with 17% of the network. Ferrand's most affected passing partners are Owen Brightwell, Jonah Pike, and Milo Dancy. I recommend instructing the team to find alternative passing routes through Theo Ashgrove to maintain attacking flow if Ferrand is tightly marked."
+   },
+   {
+    "question": "Who is going to win from here?",
+    "tools": [
+     "win_probability"
+    ],
+    "tools_ok": true,
+    "mention_ok": true,
+    "source": "ai",
+    "guard": [],
+    "judge": 5,
+    "judge_reason": "The answer directly addresses the question with specific win probabilities, uses the given data, and provides a sensible tactical recommendation for the team to maintain their lead.",
+    "seconds": 6.3,
+    "answer": "At minute 70 with the current score 1-0 in favor of Northbridge FC, the win probability is strongly in our favor at 82%, with only a 2% chance for Riverside Athletic to win and 16% for a draw. The most likely final score is 1-0, followed by 1-1 or 2-0. We are in a good position to maintain the lead and potentially extend it. I recommend focusing on maintaining solid defense and controlling possession to see out the game."
+   },
+   {
+    "question": "How has Northbridge changed since half-time?",
+    "tools": [
+     "compare_windows"
+    ],
+    "tools_ok": true,
+    "mention_ok": true,
+    "source": "ai",
+    "guard": [],
+    "judge": 5,
+    "judge_reason": "The answer directly addresses the question by detailing changes in player involvement, passing distribution, and accuracy since half-time, providing a clear and data-supported summary of Northbridge's performance.",
+    "seconds": 4.8,
+    "answer": "Since half-time, Northbridge FC has shifted its fault line from Luca Ferrand to Theo Ashgrove, increasing his involvement in play to 14%. The passing spread has improved by 14%, indicating a wider distribution of passes, but progressive passes have slightly decreased by 7%. Pass completion has dropped from 88% to 80%, suggesting some loss of accuracy. Overall, the team is spreading the ball more but with less precision and slightly fewer forward passes."
+   },
+   {
+    "question": "Which of our wingers is doing better?",
+    "tools": [
+     "assess_player"
+    ],
+    "tools_ok": true,
+    "mention_ok": true,
+    "source": "ai",
+    "guard": [],
+    "judge": 5,
+    "judge_reason": "The answer directly compares both wingers using the provided data, concludes they are performing similarly and underperforming, and sensibly recommends tactical adjustments to improve their involvement.",
+    "seconds": 5.8,
+    "answer": "Both wingers, Milo Dancy (RW) and Rafa Quinlan (LW), are performing similarly with plan fits slightly below the role norm (39 and 38 respectively) and both flagged as off plan. Neither has created passes that set up shots or expected assists as expected for their roles. Their form is steady, and their involvement and key passes are equal. Given this, neither winger is clearly doing better; they are both underperforming similarly. I recommend focusing on tactical adjustments to better involve both wingers in chance creation."
+   },
+   {
+    "question": "Should I take Ferrand off?",
+    "tools": [
+     "squad_assessment",
+     "what_if_remove"
+    ],
+    "tools_ok": true,
+    "mention_ok": true,
+    "source": "ai",
+    "guard": [],
+    "judge": 5,
+    "judge_reason": "The answer directly addresses the question using the provided data, explains the tactical impact of removing Ferrand, and gives a clear, sensible recommendation to substitute him.",
+    "seconds": 10.1,
+    "answer": "Luca Ferrand is highly relevant to the game plan but is currently fading and overloaded, with a plan fit dropping to 44 in the last 15 minutes. Removing him would not cause loss of connectivity in the passing network, as the team would shift the fault line to Theo Ashgrove, who currently holds 42% of the network. Given Ferrand's fading form and overload, it is advisable to substitute him to maintain midfield effectiveness and reduce fatigue. I recommend taking Luca Ferrand off now."
+   },
+   {
+    "question": "Is Ashgrove getting enough service?",
+    "tools": [
+     "assess_player"
+    ],
+    "tools_ok": true,
+    "mention_ok": true,
+    "source": "ai",
+    "guard": [],
+    "judge": 5,
+    "judge_reason": "The answer directly addresses Ashgrove's current service levels using the provided data and offers a clear tactical recommendation to improve his involvement and service.",
+    "seconds": 5.1,
+    "answer": "Theo Ashgrove is the focal point of our attack and is expected to get shots away in the box. However, he is currently bypassed, receiving only 0.6 times the ball load expected for his role, with a plan fit of 42, which is below the role norm. His pass completion is also slightly below the norm at 74%. To improve his service, we should focus on increasing his involvement in the build-up play and creating more opportunities for him in the box. I recommend adjusting the attacking build-up to channel more passes towards Ashgrove."
+   },
+   {
+    "question": "What is Riverside's weak side?",
+    "tools": [
+     "zone_report"
+    ],
+    "tools_ok": true,
+    "mention_ok": true,
+    "source": "ai",
+    "guard": [],
+    "judge": 5,
+    "judge_reason": "The answer directly identifies Riverside's weak side using the given data on ball losses and attacking patterns, and provides a clear tactical recommendation to exploit it.",
+    "seconds": 5.8,
+    "answer": "Riverside Athletic's weak side appears to be their left flank in the middle third, where they have the most ball losses (17). They have fewer final third entries and shots from the left side compared to the center and right. Attacking Riverside's left side could exploit this vulnerability. I recommend focusing our attacks on their left flank to capitalize on their ball loss tendency there."
+   },
+   {
+    "question": "Are our full-backs doing their job?",
+    "tools": [
+     "assess_player"
+    ],
+    "tools_ok": true,
+    "mention_ok": true,
+    "source": "ai",
+    "guard": [],
+    "judge": 5,
+    "judge_reason": "The answer directly evaluates both full-backs using the provided data and sensibly recommends improving Sami Okafor's passing and involvement, addressing the question fully.",
+    "seconds": 6.7,
+    "answer": "Eli Mensah, the right-back, is doing well in his role with a plan fit of 53 and a high pass completion of 95%, though he is overloaded as the team relies on him more than planned. However, he has not completed any passes into the final third, which is below expectations. Sami Okafor, the left-back, is struggling with a plan fit of 36 and a low pass completion of 62%, and he is off plan with no completed passes into the final third. I recommend encouraging Sami Okafor to improve his passing accuracy and involvement in advancing the ball into the final third."
+   },
+   {
+    "question": "Who has been our best player?",
+    "tools": [
+     "squad_assessment"
+    ],
+    "tools_ok": true,
+    "mention_ok": true,
+    "source": "ai",
+    "guard": [],
+    "judge": 5,
+    "judge_reason": "The answer directly identifies the best player using the provided data, explains the metrics clearly, and offers a sensible evaluation of the player's current form and role impact.",
+    "seconds": 5.7,
+    "answer": "The best player for Northbridge FC so far has been Luca Ferrand, the central defensive midfielder, with a plan fit of 82, which is well above the role norm of 50. He is highly relevant to the game plan (5/5) and has been carrying a heavy load, although his form is fading recently. Despite this, he remains the most effective player in his role compared to others on the team."
+   },
+   {
+    "question": "Is Riverside's game plan working?",
+    "tools": [
+     "plan_execution"
+    ],
+    "tools_ok": true,
+    "mention_ok": true,
+    "source": "ai",
+    "guard": [],
+    "judge": 5,
+    "judge_reason": "The answer directly assesses Riverside's game plan using the provided execution scores and offers a clear, sensible recommendation to improve counter-attacking and involve the key striker more.",
+    "seconds": 6.7,
+    "answer": "Riverside Athletic's overall game plan execution is currently at 43, which is below the league norm and indicates it is not working well. Key principles like staying compact and hitting on the counter, as well as wingers breaking forward quickly, are notably struggling with scores of 42 and 36 respectively. Mateo Lindqvist, their key outlet striker, is also not effective in finishing chances. The midfielders are mixed in their defensive duties, with some doing better than others. The recommendation is to focus on improving the counter-attacking transitions and getting Mateo Lindqvist more involved in goal-scoring opportunities."
+   },
+   {
+    "question": "Their winger Reyes keeps getting forward; who needs to deal with it?",
+    "tools": [
+     "assess_player",
+     "game_plan",
+     "zone_report"
+    ],
+    "tools_ok": true,
+    "mention_ok": false,
+    "source": "ai",
+    "guard": [],
+    "judge": 5,
+    "judge_reason": "The answer directly identifies the player responsible for dealing with Reyes, uses the data given about player roles, and provides a clear tactical recommendation.",
+    "seconds": 7.5,
+    "answer": "Callum Reyes, the Riverside Athletic right winger, is breaking forward quickly in transition and has a role relevance of 3/5 for this duty. Our left winger Rafa Quinlan is responsible for creating chances and counter-pressing to win the ball back high, which includes dealing with Reyes. Given Reyes' activity and our plan, Rafa Quinlan should be the primary player to handle Reyes' forward runs. I recommend instructing Rafa Quinlan to focus more on tracking and pressuring Callum Reyes to limit his forward impact."
+   },
+   {
+    "question": "Who is being bypassed in our build-up?",
+    "tools": [
+     "squad_assessment"
+    ],
+    "tools_ok": true,
+    "mention_ok": true,
+    "source": "ai",
+    "guard": [],
+    "judge": 5,
+    "judge_reason": "The answer directly identifies Theo Ashgrove as being bypassed using the provided data and sensibly recommends involving him more in the build-up to enhance attacking effectiveness.",
+    "seconds": 4.4,
+    "answer": "Theo Ashgrove, the striker, is being bypassed in our build-up. He has a plan fit of 42 overall and 43 in the last 15 minutes, flagged as bypassed, meaning he is a key role not getting the ball as expected. This could limit our attacking threat through the center. I recommend trying to involve Theo Ashgrove more in the build-up to increase our offensive effectiveness."
+   },
+   {
+    "question": "Is Kai Andersen fading?",
+    "tools": [
+     "assess_player"
+    ],
+    "tools_ok": true,
+    "mention_ok": true,
+    "source": "ai",
+    "guard": [],
+    "judge": 5,
+    "judge_reason": "The answer directly addresses whether Kai Andersen is fading by analyzing his performance data and provides a clear, sensible recommendation to improve his forward passing.",
+    "seconds": 4.0,
+    "answer": "Kai Andersen is not fading; his form is steady and his load share matches the plan's expectations. However, he is slightly underperforming in completing passes into the final third and forward passes over 10 meters compared to the role norm. His pass completion rate is strong at 88%, above the role norm of 82%. Overall, he is performing close to the plan but could be more progressive in advancing the ball. I recommend encouraging him to increase his forward passing to better fulfill his role."
+   },
+   {
+    "question": "Give me three points for the half-time talk.",
+    "tools": [
+     "plan_execution",
+     "squad_assessment",
+     "what_if_remove",
+     "zone_report"
+    ],
+    "tools_ok": true,
+    "mention_ok": true,
+    "source": "ai (self-corrected)",
+    "guard": [],
+    "judge": 5,
+    "judge_reason": "The answer directly addresses the half-time talk request with three clear points based on the provided data and offers a sensible tactical recommendation.",
+    "seconds": 9.9,
+    "answer": "For the half-time talk, here are three points to focus on:\n\n1. Our overall plan execution is 56, with the winger principle at 36 (not working) and full-backs overlapping at 45 (mixed). Rafa Quinlan and Sami Okafor are off plan and need to improve their attacking contributions.\n2. Luca Ferrand is overloaded and fading, but removing him would result in 0% teammates' connectivity lost and 20% of passes in the last 15 minutes went through him. Theo Ashgrove would become the new fault line with 17% of the network. Key partners affected would be Owen Brightwell (4 passes), Jonah Pike (2 passes), and Milo Dancy (2 passes).\n3. Our attacks are mostly through the centre (6 final third entries) with few on the left (1) and right (1). We lose the ball mostly in the middle third centre (5) and final third centre (4). We should try to use the flanks more to reduce central congestion.\n\nRecommendation: Focus on improving winger and full-back effectiveness and diversify attacks to the flanks; keep Luca Ferrand on the pitch but monitor his condition closely."
+   },
+   {
+    "question": "Should we go more direct?",
+    "tools": [
+     "plan_execution",
+     "zone_report"
+    ],
+    "tools_ok": true,
+    "mention_ok": true,
+    "source": "ai",
+    "guard": [],
+    "judge": 5,
+    "judge_reason": "The answer directly addresses the question using the provided data and offers a clear, sensible tactical recommendation to go more direct by targeting the striker to exploit defensive gaps.",
+    "seconds": 5.9,
+    "answer": "The current game plan for Northbridge FC is being executed with mixed success overall, with a score of 56. The principle of controlling the game through patient possession and short passing is only mixed, and the wingers' role in creating chances and counter-pressing is not working well, scoring just 36. The team is losing the ball mostly in the middle and final thirds, especially centrally, and has limited final third entries and shots from the wings. Riverside Athletic is also focusing their play through the center but has not been able to create shots recently.\n\nGiven this, going more direct could help bypass the congested central areas and the struggling wing play, potentially creating quicker chances. I recommend instructing the team to increase direct forward passes, especially targeting the striker Theo Ashgrove, to exploit any gaps before Riverside's defense can organize."
+   },
+   {
+    "question": "Who should I bring on?",
+    "tools": [
+     "squad_assessment",
+     "what_if_remove"
+    ],
+    "tools_ok": true,
+    "mention_ok": false,
+    "source": "ai",
+    "guard": [],
+    "judge": 5,
+    "judge_reason": "The answer directly addresses the substitution question using the provided data and sensibly recommends substituting Luca Ferrand to refresh the midfield and reduce overload.",
+    "seconds": 7.9,
+    "answer": "Among the substitution candidates, Luca Ferrand is highly relevant to the plan but is fading and overloaded, while Theo Ashgrove is steady but bypassed and has a lower pass completion than the role norm. Rafa Quinlan is off plan and has not contributed expected assists or shot setups. Since Luca Ferrand is crucial but fading and overloaded, it would be wise to substitute him to refresh the midfield and reduce the overload. I recommend bringing Luca Ferrand off for a fresher player in the CDM role."
+   },
+   {
+    "question": "Should I take off the goalkeeper?",
+    "tools": [
+     "assess_player",
+     "squad_assessment",
+     "what_if_remove"
+    ],
+    "tools_ok": true,
+    "mention_ok": true,
+    "source": "ai",
+    "guard": [],
+    "judge": 5,
+    "judge_reason": "The answer directly addresses the question using the provided player data and sensibly recommends not substituting the goalkeeper.",
+    "seconds": 5.5,
+    "answer": "Tomas Varga, the goalkeeper, is performing steadily with a plan fit of 53 overall and 47 in the last 15 minutes, which is close to the role norm. He has excellent pass completion at 100%, better than the norm, but is making fewer long passes than expected. There are no flags indicating any major issues or fading form. Given this, there is no strong reason to substitute the goalkeeper at this moment. I recommend keeping Tomas Varga on the field."
+   },
+   {
+    "question": "Recommend a pizza place near the stadium",
+    "tools": [],
+    "tools_ok": true,
+    "mention_ok": true,
+    "source": "router (gated)",
+    "guard": [],
+    "judge": 1,
+    "judge_reason": "The answer does not address the question about pizza places and instead redirects to unrelated match topics.",
+    "seconds": 1.4,
+    "answer": "I can only answer questions about this match and your game plan: try 'Who should I take off?', 'Is our game plan working?' or 'What happens if Ferrand is marked out?'"
+   }
+  ]
+ }
+}

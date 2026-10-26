@@ -141,4 +141,9 @@ agents.CTX.set({"events": [e for e in ev if e["t"] < 4200], "minute": 70, "seed"
 assert agents.advice_issues("I recommend taking off Luca Ferrand.") and agents.advice_issues("Substitute Tomas Varga."), "coaching guard"
 agents.what_if_remove("Ferrand")
 assert not agents.advice_issues("I recommend taking off Luca Ferrand."), "guard clears once the counterfactual was checked"
+assert "their Callum Reyes (RW) vs our Sami Okafor (LB)" in agents.matchups("home"), "flanks mirror: their right meets our left"
+agents.CTX.get()["outputs"].clear()
+pick = agents._gather_substitution("home", [])[0]
+assert pick["recommended_substitution"] == agents._gather_substitution("home", [])[0]["recommended_substitution"] == HUB[1], \
+    "substitution advice is a deterministic rule (demo: the man-marked, fading hub, whose removal costs under 10%)"
 print("validation fixes ok")

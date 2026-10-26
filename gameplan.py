@@ -264,6 +264,7 @@ def zones(events, team, minute, window=None):
         prev = e
     top = lambda d: dict(sorted(d.items(), key=lambda kv: -kv[1])[:4])
     return {"team": TEAMS[team]["name"], "window": f"last {window} min" if window else "whole match so far",
+            "frame": f"left/centre/right are from {TEAMS[team]['name']}'s own attacking direction: their right flank meets the opponent's left flank",
             "final_third_entries_by_channel": entries, "shots_by_channel": shots,
             "most_ball_losses": top(losses), "most_ball_wins": top(wins)}
 

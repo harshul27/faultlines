@@ -78,7 +78,13 @@ try:
             jsonschema.validate(c, CUE_SCHEMA)
     assert any("snapshot" in d for d in live), "completed passes push a fresh snapshot"
     resumed = read({"Last-Event-ID": str(ids[-1])}, want=3)
-    assert resumed[0]["event"] != "hello" and int(resumed[0]["id"]) == ids[-1] + 1, "reconnect resumes without gaps"
+    assert resumed[0]["event"] != "hello" and int(resumed[0]["id"]) == ids[-1] + 1, f"reconnect resumes without gaps: last={ids[-1]} got={[(m['id'], m['event']) for m in resumed]}"
+    # AI endpoints: validated inputs; without Foundry configured they degrade instead of failing
+    assert httpx.post(f"{base}/ask", json={"question": "Who wins?", "seed": 23, "minute": 70}, timeout=5).status_code == 503
+    assert httpx.get(f"{base}/explain", params={"seed": 999, "minute": 70}, timeout=5).status_code == 400
+    assert httpx.get(f"{base}/explain", params={"seed": 23, "minute": 70, "lang": "Klingon"}, timeout=5).status_code == 400
+    ex = httpx.get(f"{base}/explain", params={"seed": 23, "minute": 70, "team": "home", "lang": "Spanish"}, timeout=30).json()
+    assert ex["source"] == "template" and ex["text"], "no AI configured -> grounded template"
 finally:
     proc.terminate()
 print("ok")

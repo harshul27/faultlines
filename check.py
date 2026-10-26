@@ -61,3 +61,25 @@ for mode in ("Casual", "Analyst"):
         assert text and src.startswith(("ai", "template")), "explanation must always render"
 assert template(f, "Analyst") != template(f, "Casual"), "analyst and casual views must differ"
 print("ok")
+
+# Agentic layer, offline: tools are deterministic, grounded, and the fact-check catches flipped trends
+import agents
+from grounding import check as fact_check
+
+agents.CTX.set({"events": [e for e in ev if e["t"] < 70 * 60], "minute": 70, "seed": 23, "trace": [], "outputs": []})
+state, prof = agents.match_state(), agents.player_profile("Ferrand")
+wi, wp, cw = agents.what_if_remove("Luca Ferrand"), agents.win_probability(), agents.compare_windows("home", 45, 70)
+assert prof["player"] == "Luca Ferrand" and "error" in agents.player_profile("Nobody Real"), "player lookup must be strict"
+assert wi["new_fault_line_without_them"].split(" would")[0] != "Luca Ferrand", "what-if must name a different fault line"
+probs = [int(wp[k].rstrip("%")) for k in wp if k.endswith("_win") or k == "draw"]
+assert 98 <= sum(probs) <= 102 and wp["simulations"] == 10_000, "Monte Carlo outcomes must sum to ~100%"
+assert agents.win_probability() == wp, "same minute, same forecast (seeded)"
+assert len(agents.CTX.get()["trace"]) == 7, "every tool call is traced"
+spread = cw["passing_spread"]  # e.g. 'up 14% (25.1 -> 28.6)'
+word, n = spread.split()[0], spread.split()[1]
+opposite = "fell" if word == "up" else "rose"
+assert fact_check(f"Passing spread {opposite} {n}.", cw), "fact-check must catch a flipped trend"
+assert not fact_check(f"Passing spread is {word} {n}.", cw), "a correct trend must pass"
+assert agents._rules("What if Ferrand is subbed off?")["intent"] == "what_if"
+assert agents._rules("Who will win this?")["intent"] == "prediction"
+print("agents ok")

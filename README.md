@@ -21,7 +21,7 @@ challenge requirement is met and tested.
 * **Live:** broadcast-style pitch network with the fault line ringed, ball trail, lower-third cue graphics, scorebug,
   momentum sparklines and an event ticker. Follow either club, pick a favourite player, Casual or Analyst.
 * **Deep analysis:** network dependence heat strip (players × minutes), player profile with dependence over time,
-  pass map and passing partners, team connectivity, progression and ball security, analyst read, key moments.
+  pass map and passing partners, passing spread, progression and ball security, analyst read, key moments.
 
 Architecture (modelled on live sports data distribution: provider feed → stream processor → pub/sub → clients):
 ```
@@ -42,9 +42,24 @@ python check_web.py                     # static data + live SSE protocol tests
 | Piece | Azure service | Notes |
 |---|---|---|
 | Live feed + `/explain` API | **Azure Container Apps** (`server.py`, `Dockerfile`) | 1 replica (shared match clock), 0.25 vCPU, external HTTPS ingress, SSE |
-| AI explanations | **Microsoft Foundry**, `gpt-4.1-mini` (GlobalStandard) | Keyless: the container's **managed identity** has *Cognitive Services OpenAI User*; answers are fact-checked, cached per match minute, capped per day (`AI_DAILY_CAP`) |
+| AI explanations + agents | **Microsoft Foundry**: `gpt-4.1-mini` (analyst, narration, translation), `Phi-4-mini-instruct` (router), `text-embedding-3-small` (memory) | Keyless: the container's **managed identity** has *Cognitive Services OpenAI User*; answers are fact-checked, cached per match minute, capped per day (`AI_DAILY_CAP`) |
 | Image | **Azure Container Registry** (Basic) | Pulled with the app's managed identity (*AcrPull*), no registry passwords |
 | Page | GitHub Pages | CORS on the API allows only the page's origin |
+
+## AI agents: "Ask the analyst"
+Viewers ask free-text questions on the Deep analysis tab (`POST /ask`). A small team of agents answers, built with
+**Microsoft Agent Framework** on **Microsoft Foundry**, and the page shows a trace of every step:
+
+| Agent | Model | Job |
+|---|---|---|
+| Router | **Phi-4-mini-instruct** | Micro-decision gate: question → JSON intent + confidence. Off-topic or unclear questions stop here (no big-model call). Hedged request: if Phi is slow, gpt-4.1-mini races it after 2.5 s; keyword rules if both fail |
+| Memory | text-embedding-3-small | Keeps only earlier turns whose embedding similarity to the new question clears a salience threshold, not the last N |
+| Analyst | gpt-4.1-mini via **Agent Framework** | Calls match tools: `match_state`, `player_profile`, `what_if_remove` (counterfactual network without a player), `win_probability` (10,000-run Monte Carlo from the current score), `compare_windows` |
+| Verifier | deterministic | Every number must come from a tool output and every trend must keep its direction (`grounding.py`); on failure the analyst gets the critique and rewrites once (self-reflection), else a deterministic answer from the tool outputs |
+| Translator | gpt-4.1-mini | Translates only the verified English answer; the numbers must survive unchanged or the English is shown |
+
+Cost and safety: inputs validated, AI calls capped per day, answers rendered as text (never HTML), keyless managed identity.
+
 
 ## Run
 ```bash

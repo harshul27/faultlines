@@ -87,7 +87,7 @@ with right:
     st.caption(f"Source: {source}. Every number is computed from the event stream.")
 
     tl = pd.DataFrame({TEAMS[t]["name"]: dict(connectivity_timeline(events, t, minute, window)) for t in TEAMS})
-    st.caption("Passing connectivity over time (higher = better connected)")
+    st.caption("Passing spread over time (higher = ball shared more evenly)")
     st.line_chart(tl, height=200)
 
     st.caption("Live cues (newest first)")

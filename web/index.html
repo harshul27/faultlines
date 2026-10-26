@@ -66,8 +66,8 @@
           <p id="fav-text" class="explain fav-line"></p>
         </div>
         <div class="card">
-          <div class="label">Passing connectivity <span class="muted">(rolling 15 min)</span></div>
-          <svg id="spark-conn" class="spark" viewBox="0 0 300 70" aria-label="Connectivity over time"></svg>
+          <div class="label">Passing spread <span class="muted">(how evenly the ball is shared, rolling 15 min)</span></div>
+          <svg id="spark-conn" class="spark" viewBox="0 0 300 70" aria-label="Passing spread over time"></svg>
           <div class="label">Forward progression <span class="muted">(progressive passes, rolling 15 min)</span></div>
           <svg id="spark-prog" class="spark" viewBox="0 0 300 70" aria-label="Progression over time"></svg>
         </div>
@@ -83,6 +83,16 @@
     </section>
 
     <section id="panel-analysis" role="tabpanel" aria-labelledby="tab-analysis" class="analysis" hidden>
+      <div class="card wide ask">
+        <div class="label">Ask the analyst <span class="muted">(AI agents on Microsoft Foundry · every number checked against the match data)</span></div>
+        <form id="ask-form" class="ask-form">
+          <input id="ask-q" maxlength="300" autocomplete="off" placeholder="e.g. What happens if Ferrand is marked out of the game?" aria-label="Your question">
+          <button type="submit" id="ask-go">Ask</button>
+        </form>
+        <div id="ask-chips" class="chips"></div>
+        <p id="ask-off" class="muted small" hidden>Questions need the live server (AI runs server-side, so no keys ever reach the browser). Replays and charts work without it.</p>
+        <div id="ask-log" class="ask-log" aria-live="polite"></div>
+      </div>
       <div class="card wide">
         <div class="label">Network dependence over time <span class="muted">(share of teammates' passing connectivity lost without each player; faded = first 15 min, low confidence; click a row)</span></div>
         <div id="heat" class="heat"></div>
@@ -104,7 +114,7 @@
       </div>
       <div class="grid2">
         <div class="card">
-          <div class="label">Team connectivity</div>
+          <div class="label">Passing spread <span class="muted">(higher = shared more evenly; lower = play runs through fewer links)</span></div>
           <svg id="tc-conn" class="chart" viewBox="0 0 400 150"></svg>
         </div>
         <div class="card">

@@ -206,6 +206,8 @@ function renderAnalysis() {
     { color: teamColor(tm), pts: minuteSeries((s) => s.teams[tm].progressive) },
     { color: teamColor(tm), dash: "2 3", width: 1.5, pts: minuteSeries((s) => s.teams[tm].completion * 100) }]), { yMax: 100, marker: currentT() / 60 });
   $("an-text").textContent = S.snap?.explain?.[team]?.Analyst ?? "";
+  renderChips();
+  $("ask-off").hidden = AI.on;
   const tname = S.meta?.teams[team].name;
   $("moments").innerHTML = S.cues.filter((c) => c.team === tname || c.cue === "goal").slice(-12).reverse()
     .map((c) => `<li><time>${c.match_clock}</time><span><span class="kind">${c.cue.replaceAll("_", " ")}</span> ${c.headline}</span></li>`).join("");
@@ -378,6 +380,46 @@ async function refreshAI(now) {
   } catch { /* keep the template; try again next minute */ } finally { AI.busy = false; }
 }
 $("lang").onchange = (e) => { S.lang = e.target.value; S.dirty = true; };
+
+// ---------- Ask the analyst (agents run server-side; text is inserted with textContent only) ----------
+const askHistory = [];
+const node = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+function renderChips() {
+  const team = S.meta?.teams[S.follow].name, fl = S.snap?.teams[S.follow].spof;
+  if (!team) return;
+  const chips = [fl && `Why does ${team} depend on ${fl}?`, fl && `What happens if ${fl} is marked out of the game?`,
+    "Who is going to win from here?", `How has ${team} changed since half-time?`].filter(Boolean);
+  if ($("ask-chips").dataset.key === chips.join("|")) return;
+  $("ask-chips").dataset.key = chips.join("|");
+  $("ask-chips").replaceChildren(...chips.map((c) => { const b = node("button", "", c); b.type = "button"; b.onclick = () => { $("ask-q").value = c; askAnalyst(); }; return b; }));
+}
+async function askAnalyst() {
+  const question = $("ask-q").value.trim();
+  if (question.length < 3 || !S.meta) return;
+  if (!AI.on) { $("ask-off").hidden = false; return; }
+  const minute = Math.max(1, Math.floor(currentT() / 60));
+  const entry = node("div", "qa");
+  entry.append(node("div", "q", `${clock(minute * 60)} · ${question}`), node("div", "a", "Routing → analysing → verifying…"));
+  $("ask-log").append(entry);
+  $("ask-go").disabled = true; $("ask-q").value = "";
+  try {
+    const r = await fetch(`${LIVE}/ask`, { method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(60000),
+      body: JSON.stringify({ question, minute, seed: S.live ? "live" : S.meta.seed, lang: S.lang, history: askHistory.slice(-6) }) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+    const a = entry.querySelector(".a"); a.textContent = d.answer; a.dir = "auto";
+    const total = d.trace.reduce((s, x) => s + (x.ms || 0), 0);
+    entry.append(node("div", "src", `${d.source} · ${d.model_calls} model calls · ${(total / 1000).toFixed(1)} s`));
+    const det = node("details"); det.append(node("summary", "", "How the agents answered"));
+    const ol = node("ol");
+    for (const s of d.trace) ol.append(node("li", "", `${s.agent}${s.tool ? ` → ${s.tool}(${Object.values(s.args || {}).join(", ")})` : ""}${s.detail ? `: ${s.detail}` : ""} · ${s.ms} ms`));
+    det.append(ol); entry.append(det);
+    askHistory.push({ q: question, a: d.answer });
+  } catch (err) {
+    entry.querySelector(".a").replaceWith(node("div", "a err", `Couldn't answer: ${err.message}`));
+  } finally { $("ask-go").disabled = false; }
+}
+$("ask-form").onsubmit = (e) => { e.preventDefault(); askAnalyst(); };
 
 async function liveAvailable() {
   try {

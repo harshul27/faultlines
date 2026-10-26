@@ -5,3 +5,5 @@ numpy>=2.2
 scipy>=1.16
 openai>=2.0
 azure-identity>=1.19
+agent-framework-core==1.23.0
+agent-framework-openai==1.17.0

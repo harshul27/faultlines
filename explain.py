@@ -1,11 +1,11 @@
-"""Grounded explanations: the model may only restate computed facts; any unsupported number is rejected.
+"""Grounded explanations: the model may only restate computed facts; unsupported numbers or flipped trends are rejected.
 
-Uses a Microsoft Foundry / Azure OpenAI deployment when AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_DEPLOYMENT are set
-(auth via your `az login`, no keys). Otherwise falls back to a deterministic template.
+Uses Microsoft Foundry when AZURE_OPENAI_ENDPOINT is set (keyless, see ai.py); otherwise a deterministic template.
 """
 import json
-import os
-import re
+
+import ai
+import grounding
 
 
 def pct(v):
@@ -19,7 +19,8 @@ def facts(view, opponent, score, favourite=None):
         "minute": view["minute"], "team": view["name"], "opponent": opponent["name"],
         "score": f"{score[view['team']]}-{score[opponent['team']]}",
         "window_minutes": view["window"],
-        "team_connectivity_change_vs_previous_window": f"{round(change * 100):+d}%",
+        # Direction is spelled out so neither the model nor the fact-check has to infer it from a sign
+        "passing_spread_trend": f"{'up' if change > 0 else 'down' if change < 0 else 'flat'} {abs(round(change * 100))}% vs previous window",
         "key_player": spof["name"], "key_player_role": spof["role"],
         "connectivity_lost_without_key_player": pct(spof["fragility"]),
         "same_player_previous_window": pct(spof["fragility_prev"]),
@@ -40,8 +41,8 @@ def template(f, mode):
     if mode == "Analyst":
         s = (f"{f['minute']}' | {f['team']} {f['score']} {f['opponent']}. Single point of failure: {f['key_player']} "
              f"({f['key_player_role']}): removing them costs {f['connectivity_lost_without_key_player']} of passing "
-             f"connectivity (prev window {f['same_player_previous_window']}). Team connectivity "
-             f"{f['team_connectivity_change_vs_previous_window']} vs the previous {f['window_minutes']} min; "
+             f"connectivity (prev window {f['same_player_previous_window']}). Passing spread "
+             f"{f['passing_spread_trend']}; "
              f"progressive passes {f['progressive_passes_in_window']} (prev {f['progressive_passes_previous_window']}), "
              f"completion {f['pass_completion_in_window']}. "
              f"{f['opponent']}'s most critical link, {f['opponent_key_player']}, carries "
@@ -59,44 +60,31 @@ def template(f, mode):
 
 
 def grounded(text, f):
-    """Fact-check: every number in the text must appear in the facts."""
-    allowed = set(re.findall(r"\d+(?:\.\d+)?", json.dumps(f)))
-    return all(n in allowed for n in re.findall(r"\d+(?:\.\d+)?", text))
-
-
-_client = None
-
-
-def _llm():
-    global _client
-    if _client is None:
-        from azure.identity import DefaultAzureCredential, get_bearer_token_provider
-        from openai import AzureOpenAI
-        # No keys: `az login` locally, the container's managed identity in Azure
-        _client = AzureOpenAI(
-            azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"], api_version="2024-10-21",
-            azure_ad_token_provider=get_bearer_token_provider(
-                DefaultAzureCredential(exclude_interactive_browser_credential=True),
-                "https://cognitiveservices.azure.com/.default"))
-    return _client
+    """Fact-check: every number must appear in the facts and every trend must keep its direction."""
+    return not grounding.check(text, f)
 
 
 def explain(f, mode="Casual", language="English"):
-    """Returns (text, source) where source is 'ai', 'template', or 'template (ai failed fact-check)'."""
-    if not (os.getenv("AZURE_OPENAI_ENDPOINT") and os.getenv("AZURE_OPENAI_DEPLOYMENT")):
+    """Returns (text, source). Written in English, fact-checked, then translated with numbers preserved.
+    source: 'ai', 'ai (shown in English: translation altered numbers)', or a 'template ...' fallback."""
+    if not ai.enabled():
         return template(f, mode), "template"
     style = ("a concise tactical analyst for a studio graphic" if mode == "Analyst"
              else "a friendly broadcaster explaining to a casual fan, no jargon")
     msg = [
         {"role": "system", "content": (
-            f"You are {style}. Write 2-3 sentences in {language} explaining why the key player matters to their "
-            "team's passing network right now, and whether the team is still moving the ball forward. Use ONLY the facts given. Copy numbers exactly as written; "
-            "do not compute or invent any other number. Always write digits as 0-9.")},
+            f"You are {style}. Write 2-3 sentences in English explaining why the key player matters to their "
+            "team's passing network right now, and whether the team is still moving the ball forward. "
+            "Use ONLY the facts given. Copy numbers and trend directions exactly as written; do not compute, "
+            "round or invent any other number.")},
         {"role": "user", "content": json.dumps(f, ensure_ascii=False)},
     ]
     try:
-        r = _llm().chat.completions.create(model=os.environ["AZURE_OPENAI_DEPLOYMENT"], messages=msg, temperature=0.4)
+        r = ai.client().chat.completions.create(model=ai.deployment("chat"), messages=msg, temperature=0.4)
         text = r.choices[0].message.content.strip()
+        if not grounded(text, f):
+            return template(f, mode), "template (ai failed fact-check)"
+        out, ok = grounding.translate(text, language)
+        return out, "ai" if ok else "ai (shown in English: translation altered numbers)"
     except Exception as e:  # never let a model outage break the live overlay
-        return template(f, mode) + f" [AI unavailable: {type(e).__name__}]", "template"
-    return (text, "ai") if grounded(text, f) else (template(f, mode), "template (ai failed fact-check)")
+        return template(f, mode), f"template (AI unavailable: {type(e).__name__})"

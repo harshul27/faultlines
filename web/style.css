@@ -97,3 +97,17 @@ footer { padding: 16px; text-align: center; }
 .ring { animation: pulse 1.6s ease-in-out infinite; }
 @keyframes pulse { 50% { stroke-opacity: .25; stroke-width: 1.2; } }
 @media (prefers-reduced-motion: reduce) { .ring, .badge.live::before, .lower-third { animation: none; } }
+.ask-form { display: flex; gap: 8px; }
+.ask-form input { flex: 1; min-width: 0; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.ask-form button { background: var(--accent); color: #111; border: 0; border-radius: 8px; padding: 0 18px; font-weight: 800; cursor: pointer; }
+.ask-form button:disabled { opacity: .5; cursor: wait; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 4px; }
+.chips button { background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; font-size: 12px; cursor: pointer; color: var(--muted); }
+.chips button:hover { color: var(--text); border-color: var(--accent); }
+.ask-log { display: flex; flex-direction: column-reverse; gap: 10px; margin-top: 8px; }
+.qa { border-left: 3px solid var(--accent); padding: 4px 0 4px 12px; }
+.qa .q { color: var(--muted); font-size: 12px; } .qa .a { margin: 4px 0; line-height: 1.5; }
+.qa .src { font-size: 11px; color: var(--accent); }
+.qa details { font-size: 12px; color: var(--muted); } .qa summary { cursor: pointer; }
+.qa ol { margin: 6px 0; padding-left: 18px; } .qa li { margin: 2px 0; }
+.qa .err { color: var(--bad); }

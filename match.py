@@ -76,13 +76,13 @@ def _pos(role, bx, by, c, rng, sd=5):
     return min(99, max(1, rng.gauss(px, sd))), min(99, max(1, rng.gauss(py, sd)))
 
 
-def simulate(seed=7, minutes=95, p=None, storyline=True):
+def simulate(seed=7, minutes=95, p=None, storyline=True, st=None):
     """Yield events in time order: dicts with t, minute, team, type, player, recipient, x, y, end_x, end_y, success, pressure, xg, goal."""
     p = p or params()
     rng = random.Random(seed)
     roles = {t: squad(t) for t in TEAMS}
     other = {"home": "away", "away": "home"}
-    st = strengths(seed, p)
+    st = st or strengths(seed, p)  # pass st to replay the same two clubs with fresh randomness (Monte Carlo)
     # Goal-rate multiplier per attacking side; split between shot volume and quality
     mult = {t: math.exp(st[t]["attack"] + st[other[t]]["defence"] + (p["home_adv"] if t == "home" else 0)) for t in TEAMS}
     t, team = 0.0, "home"

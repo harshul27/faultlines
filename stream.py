@@ -11,7 +11,7 @@ CUE_SCHEMA = {
     "type": "object",
     "required": ["cue", "match_clock", "t", "team", "headline", "display_seconds", "priority", "latency_ms"],
     "properties": {
-        "cue": {"enum": ["goal", "fault_line_shift", "fault_line_alert", "network_fracture"]},
+        "cue": {"enum": ["goal", "fault_line_shift", "fault_line_alert", "network_narrowing"]},
         "match_clock": {"type": "string", "pattern": r"^\d{1,3}:\d{2}$"},
         "t": {"type": "number", "minimum": 0},
         "team": {"type": "string"},
@@ -25,7 +25,7 @@ CUE_SCHEMA = {
     },
 }
 ALERT, REARM, MARGIN = 0.20, 0.15, 0.05  # alert at 20%; re-arm below 15%; a new fault line must lead by 5 pts
-FRACTURE, MIN_GAP = -0.15, 300           # connectivity drop that counts as a fracture; seconds between same cue
+NARROWING, MIN_GAP = -0.15, 300          # drop in passing spread (play concentrated into fewer links); seconds between same cue
 
 
 class LiveEngine:
@@ -71,9 +71,9 @@ class LiveEngine:
                                      s["name"], s["fragility"], anchor))
             if v["efficiency_prev"] and e["t"] >= 2 * self.window * 60:
                 change = v["efficiency"] / v["efficiency_prev"] - 1
-                if change <= FRACTURE:
-                    out.append(self._cue("network_fracture", e, team,
-                                         f"{TEAMS[team]['name']} passing network down {round(-change * 100)}%", 2,
+                if change <= NARROWING:
+                    out.append(self._cue("network_narrowing", e, team,
+                                         f"{TEAMS[team]['name']} play narrowing: passing spread down {round(-change * 100)}%", 2,
                                          None, round(change, 3), None))
             self.spof[team] = s
         out = [c for c in out if c]

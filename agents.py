@@ -1,0 +1,354 @@
+"""Ask the analyst: a small team of agents on Microsoft Foundry, orchestrated with Microsoft Agent Framework.
+
+    Router (Phi-4-mini)      micro-decision gate: question -> JSON intent + confidence; off-topic/unclear stops here
+    Memory (embeddings)      keeps only earlier turns whose embedding is close to the new question (salience)
+    Analyst (gpt-4.1-mini)   Agent Framework agent with match tools; every number must come from a tool
+    Verifier (deterministic) checks numbers and trend directions against the tool outputs; one self-correcting
+                             rewrite, then a deterministic fallback built from the tool outputs
+    Translator (gpt-4.1-mini) translates the verified English answer; numbers must survive unchanged
+
+Every step is recorded in a trace the page shows, so viewers can see which agent did what and why.
+"""
+import asyncio
+import contextvars
+import functools
+import json
+import re
+import time
+from functools import lru_cache
+
+import numpy as np
+
+import ai
+import grounding
+from match import TEAMS, params, simulate, strengths
+from network import fragility, pass_graph, score_at, team_view
+
+CTX = contextvars.ContextVar("ctx")  # per-request match context + trace
+INTENTS = ("match_summary", "player", "what_if", "prediction", "trend", "off_topic")
+pct = lambda v: f"{round(v * 100)}%"
+
+
+def _trend(new, old, unit=""):
+    if not old:
+        return "no earlier window to compare"
+    ch = (new - old) / old
+    return f"{'up' if ch > 0 else 'down' if ch < 0 else 'flat'} {abs(round(ch * 100))}% ({old}{unit} -> {new}{unit})"
+
+
+# ---------- tools (pure functions of the match so far; registered with the Analyst agent) ----------
+def _find_player(name):
+    name = (name or "").strip().lower()
+    for t in TEAMS:
+        for p in TEAMS[t]["players"]:
+            if name and (name == p.lower() or name == p.split()[-1].lower() or name in p.lower()):
+                return t, p
+    return None, None
+
+
+def _record(tool, args, out, t0):
+    CTX.get()["trace"].append({"agent": "Analyst → tool", "tool": tool, "args": args, "ms": round((time.perf_counter() - t0) * 1000)})
+    CTX.get()["outputs"].append(out)
+    return out
+
+
+def match_state() -> dict:
+    """Current score, minute, goals, and for each team: the fault-line player, passing spread trend,
+    forward progression and pass completion over the last 15 minutes."""
+    t0, c = time.perf_counter(), CTX.get()
+    ev, m = c["events"], c["minute"]
+    out = {"minute": m, "score": f"{score_at(ev, m * 60)['home']}-{score_at(ev, m * 60)['away']} (home-away)",
+           "goals": [f"{int(e['t'] // 60)}' {e['player']} ({TEAMS[e['team']]['name']})" for e in ev if e["goal"]]}
+    for t in TEAMS:
+        v = team_view(ev, t, m)
+        out[TEAMS[t]["name"]] = {
+            "side": t, "fault_line": f"{v['spof']['name']} ({v['spof']['role']}) holds {pct(v['spof']['fragility'])} of the passing network",
+            "passing_spread": _trend(round(v["efficiency"], 1), round(v["efficiency_prev"], 1)),
+            "progressive_passes_last_15": _trend(v["progressive"], v["progressive_prev"]),
+            "pass_completion_last_15": pct(v["completion"])}
+    return _record("match_state", {}, out, t0)
+
+
+def player_profile(player: str) -> dict:
+    """One player's role in the passing network: share of the network now and at its peak, passes and
+    progressive passes in the last 15 minutes, top passing partners, late-game clutch points."""
+    t0, c = time.perf_counter(), CTX.get()
+    team, name = _find_player(player)
+    if not name:
+        return _record("player_profile", {"player": player}, {"error": f"No player called {player}"}, t0)
+    ev, m = c["events"], c["minute"]
+    v = team_view(ev, team, m)
+    me = next(p for p in v["players"] if p["name"] == name)
+    history = [(mm, next(p["fragility"] for p in team_view(ev, team, mm)["players"] if p["name"] == name))
+               for mm in range(15, int(m) + 1, 5)]
+    peak = max(history, key=lambda h: h[1]) if history else (m, me["fragility"])
+    mine = [e for e in ev if e["type"] == "pass" and e["player"] == name and (m - 15) * 60 <= e["t"] < m * 60]
+    partners = sorted(((b if a == name else a, w) for a, b, w in v["edges"] if name in (a, b)), key=lambda x: -x[1])[:3]
+    out = {"player": name, "team": TEAMS[team]["name"], "role": me["role"],
+           "network_share_now": pct(me["fragility"]), "network_share_previous_15": pct(me["fragility_prev"]),
+           "peak_network_share": f"{pct(peak[1])} at {peak[0]}'",
+           "passes_involved_last_15": me["passes"],
+           "own_passes_last_15": len(mine), "own_completion_last_15": pct(sum(e["success"] for e in mine) / len(mine)) if mine else "n/a",
+           "progressive_passes_last_15": sum(e["success"] and e["end_x"] - e["x"] > 10 for e in mine),
+           "top_partners": [f"{p} ({w} passes)" for p, w in partners], "clutch_points": me["clutch"]}
+    return _record("player_profile", {"player": player}, out, t0)
+
+
+def what_if_remove(player: str) -> dict:
+    """Counterfactual: remove one player from the current passing network and report what breaks: share of
+    teammates' connectivity lost, passes that ran through them, and who becomes the new fault line."""
+    t0, c = time.perf_counter(), CTX.get()
+    team, name = _find_player(player)
+    if not name:
+        return _record("what_if_remove", {"player": player}, {"error": f"No player called {player}"}, t0)
+    m = c["minute"]
+    G = pass_graph(c["events"], team, max(0, m - 15) * 60, m * 60)
+    total = G.size(weight="weight")
+    through = sum(d["weight"] for _, _, d in G.edges(name, data=True))
+    others = [p for p in G if p != name]
+    after = fragility(G.subgraph(others))
+    new_fl = max(after, key=after.get)
+    out = {"player": name, "team": TEAMS[team]["name"],
+           "teammates_connectivity_lost": pct(fragility(G)[name]),
+           "passes_through_player_last_15": f"{through} of {int(total)} ({pct(through / total) if total else '0%'})",
+           "new_fault_line_without_them": f"{new_fl} would hold {pct(after[new_fl])} of the network",
+           "most_affected_partners": [f"{b if a == name else a} ({d['weight']} passes with {name.split()[-1]})"
+                                      for a, b, d in sorted(G.edges(name, data=True), key=lambda e: -e[2]["weight"])[:3]]}
+    return _record("what_if_remove", {"player": player}, out, t0)
+
+
+@lru_cache(maxsize=8)
+def _goal_rates(seed):
+    """Each club's goal rate per 95 minutes, estimated by replaying these two clubs 120 times (~2 s, cached;
+    the server warms it at startup)."""
+    p = params()
+    st = strengths(seed, p)
+    goals = np.zeros(2)
+    for k in range(120):
+        for e in simulate(10_000 + k, p=p, st=st):
+            if e["goal"]:
+                goals[e["team"] == "away"] += 1
+    return goals / 120
+
+
+def win_probability() -> dict:
+    """Monte Carlo forecast from the current score and minute: 10,000 simulated finishes using each club's
+    goal rate estimated by re-simulating this fixture. Returns home win / draw / away win and likely scores."""
+    t0, c = time.perf_counter(), CTX.get()
+    m, sc = c["minute"], score_at(c["events"], c["minute"] * 60)
+    rate = _goal_rates(c["seed"]) * max(0.0, 95 - m) / 95
+    rng = np.random.default_rng(c["seed"] * 1000 + int(m))
+    h = sc["home"] + rng.poisson(rate[0], 10_000)
+    a = sc["away"] + rng.poisson(rate[1], 10_000)
+    finals = {}
+    for x, y in zip(h, a):
+        finals[(x, y)] = finals.get((x, y), 0) + 1
+    top = sorted(finals.items(), key=lambda kv: -kv[1])[:3]
+    hn, an = TEAMS["home"]["name"], TEAMS["away"]["name"]
+    out = {"minute": m, "current_score": f"{sc['home']}-{sc['away']}", "simulations": 10_000,
+           f"{hn}_win": pct((h > a).mean()), "draw": pct((h == a).mean()), f"{an}_win": pct((h < a).mean()),
+           "most_likely_final_scores": [f"{x}-{y} ({pct(n / 10_000)})" for (x, y), n in top]}
+    return _record("win_probability", {}, out, t0)
+
+
+def compare_windows(team: str, earlier_minute: int, later_minute: int) -> dict:
+    """Compare one team between two match minutes (each a rolling 15-minute window): fault line,
+    passing spread, progressive passes and pass completion, with the direction of each change."""
+    t0, c = time.perf_counter(), CTX.get()
+    side = "home" if team.lower() in ("home", TEAMS["home"]["name"].lower(), "northbridge") else "away"
+    a, b = (max(15, min(int(earlier_minute), c["minute"])), max(15, min(int(later_minute), c["minute"])))
+    va, vb = team_view(c["events"], side, a), team_view(c["events"], side, b)
+    out = {"team": TEAMS[side]["name"], "earlier": f"{a}'", "later": f"{b}'",
+           "fault_line": f"{va['spof']['name']} {pct(va['spof']['fragility'])} -> {vb['spof']['name']} {pct(vb['spof']['fragility'])}",
+           "passing_spread": _trend(round(vb["efficiency"], 1), round(va["efficiency"], 1)),
+           "progressive_passes": _trend(vb["progressive"], va["progressive"]),
+           "pass_completion": f"{pct(va['completion'])} -> {pct(vb['completion'])}"}
+    return _record("compare_windows", {"team": team, "earlier_minute": earlier_minute, "later_minute": later_minute}, out, t0)
+
+
+TOOLS = [match_state, player_profile, what_if_remove, win_probability, compare_windows]
+
+
+# ---------- router: Phi-4-mini micro-decision gate, hedged ----------
+ROUTER_PROMPT = """Classify a viewer's question about ONE football match (Northbridge FC = home, Riverside Athletic = away). Output one JSON object and nothing else.
+intent: player (about one player), what_if (removing, marking, subbing or injuring a player), prediction (who wins, final score), trend (change between times), match_summary (general state), off_topic (anything not about this match).
+
+Question: Who is Northbridge's most important passer?
+JSON: {"intent": "match_summary", "team": "home", "players": [], "confidence": 0.8}
+Question: What if Ferrand gets injured?
+JSON: {"intent": "what_if", "team": "home", "players": ["Luca Ferrand"], "confidence": 0.95}
+Question: Will Riverside come back?
+JSON: {"intent": "prediction", "team": "away", "players": [], "confidence": 0.9}
+Question: Recommend a pizza place
+JSON: {"intent": "off_topic", "team": null, "players": [], "confidence": 0.95}
+
+QUESTION_HERE
+JSON:"""
+HEDGE_AFTER, ROUTE_BUDGET = 2.5, 8.0  # seconds: ask the backup model after 2.5 s; give up on models after 8 s
+_pool = __import__("concurrent.futures").futures.ThreadPoolExecutor(max_workers=8)
+
+
+def _classify(model, prompt):
+    r = ai.client().with_options(timeout=ROUTE_BUDGET, max_retries=0).chat.completions.create(
+        model=ai.deployment(model), temperature=0, max_tokens=60, messages=[{"role": "user", "content": prompt}])
+    d = json.loads(re.search(r"\{.*?\}", r.choices[0].message.content, re.S).group(0))  # small models add prose
+    return {"intent": d.get("intent") if d.get("intent") in INTENTS else "match_summary",
+            "team": d.get("team") if d.get("team") in ("home", "away") else None,
+            "players": [p for p in (_find_player(x)[1] for x in d.get("players") or []) if p],
+            "confidence": float(d.get("confidence", 0.5))}
+
+
+def _rules(question):
+    """Last-resort router: keywords. Always answers, never smart."""
+    q = question.lower()
+    players = [p for t in TEAMS for p in TEAMS[t]["players"] if p.split()[-1].lower() in q]
+    intent = ("what_if" if re.search(r"what if|without|removed|marked|injur|sub", q) else
+              "prediction" if re.search(r"win|final score|come back|predict", q) else
+              "trend" if re.search(r"change|since|between|after|before", q) else
+              "player" if players else "match_summary")
+    return {"intent": intent, "team": None, "players": players, "confidence": 0.6}
+
+
+def _route(question, memory):
+    """Hedged request: Phi-4-mini first; if it is slow, gpt-4.1-mini races it; first valid answer wins."""
+    from concurrent.futures import FIRST_COMPLETED, wait
+    t0 = time.perf_counter()
+    prompt = ROUTER_PROMPT.replace("QUESTION_HERE", (f"Earlier: {memory}\n" if memory else "") + f"Question: {question}")
+    pending = {_pool.submit(_classify, "router", prompt): "Phi-4-mini"}
+    route, who, hedged = None, None, False
+    while pending and time.perf_counter() - t0 < ROUTE_BUDGET:
+        wait_for = HEDGE_AFTER if not hedged else ROUTE_BUDGET - (time.perf_counter() - t0)
+        done, _ = wait(pending, timeout=max(0.05, wait_for), return_when=FIRST_COMPLETED)
+        for f in done:
+            name = pending.pop(f)
+            if route is None and not f.exception():
+                route, who = f.result(), name
+        if route:
+            break
+        if not hedged:  # slow or failed: hedge with the bigger model
+            pending[_pool.submit(_classify, "chat", prompt)] = "gpt-4.1-mini (hedge)"
+            hedged = True
+    if route is None:
+        route, who = _rules(question), "keyword rules (models too slow)"
+    CTX.get()["trace"].append({"agent": f"Router ({who})", "detail": f"{route}" + (" · hedged after 2.5 s" if hedged else ""),
+                               "ms": round((time.perf_counter() - t0) * 1000)})
+    return route, who
+
+
+# ---------- memory: salience by embedding similarity ----------
+SALIENCE = 0.45
+
+
+def _memory(question, history):
+    if not history:
+        return []
+    t0 = time.perf_counter()
+    texts = [question] + [f"Q: {h['q']} A: {h['a']}" for h in history]
+    vecs = np.array([d.embedding for d in ai.client().embeddings.create(model=ai.deployment("embed"), input=texts).data])
+    vecs /= np.linalg.norm(vecs, axis=1, keepdims=True)
+    sims = vecs[1:] @ vecs[0]
+    keep = [texts[i + 1] for i in np.argsort(-sims)[:2] if sims[i] >= SALIENCE]
+    CTX.get()["trace"].append({"agent": "Memory (embeddings)", "detail": f"kept {len(keep)} of {len(history)} earlier turns "
+                               f"(salience ≥ {SALIENCE}; scores {', '.join(f'{s:.2f}' for s in sims)})",
+                               "ms": round((time.perf_counter() - t0) * 1000)})
+    return keep
+
+
+# ---------- analyst: Microsoft Agent Framework agent with tools ----------
+ANALYST_PROMPT = (
+    "You are a football analyst for a live broadcast. Answer in English in 2-4 sentences for the viewer. "
+    "Call the tools to get data: NEVER state a number that a tool did not return. Copy numbers, percentages and "
+    "trend directions exactly as the tools word them (e.g. 'down 21%'). Name players in full the first time. "
+    "If the question is about a player, call player_profile; for 'what if' questions about a player, call "
+    "what_if_remove; for who wins, call win_probability; for changes over time, call compare_windows.")
+
+
+@lru_cache(maxsize=1)
+def _analyst():
+    from agent_framework import Agent, tool
+    from agent_framework.openai import OpenAIChatCompletionClient
+    client = OpenAIChatCompletionClient(model=ai.deployment("chat"), credential=ai.credential(),
+                                        azure_endpoint=ai.endpoint(), api_version=ai.API_VERSION)
+    return Agent(client, ANALYST_PROMPT, name="analyst", tools=[tool(_off_loop(f)) for f in TOOLS])
+
+
+def _off_loop(f):
+    """Run a tool in a worker thread so analytics never stall the live SSE feed (context, incl. CTX, is copied)."""
+    @functools.wraps(f)
+    async def run(*args, **kwargs):
+        return await asyncio.to_thread(f, *args, **kwargs)
+    return run
+
+
+async def _analyse(prompt, session=None):
+    t0 = time.perf_counter()
+    resp = await _analyst().run(prompt, session=session)
+    CTX.get()["trace"].append({"agent": "Analyst (gpt-4.1-mini, Agent Framework)", "detail": "drafted answer",
+                               "ms": round((time.perf_counter() - t0) * 1000)})
+    return resp.text.strip()
+
+
+def _fallback():
+    """Deterministic answer straight from the tool outputs: always true, never fluent."""
+    outs = [o for o in CTX.get()["outputs"] if "error" not in o] or [match_state()]
+    o = outs[-1]
+    return "; ".join(f"{k.replace('_', ' ')}: {v if not isinstance(v, (list, dict)) else json.dumps(v, ensure_ascii=False)}"
+                     for k, v in o.items())
+
+
+# ---------- orchestration ----------
+async def ask(question, events, minute, seed, language="English", history=()):
+    """Returns {answer, language, source, route, trace, model_calls}."""
+    ctx = {"events": events, "minute": minute, "seed": seed, "trace": [], "outputs": []}
+    CTX.set(ctx)
+    calls = 0
+    memory = await asyncio.to_thread(_memory, question, list(history)[-6:]) if history else []
+    calls += bool(history)
+    route, who = await asyncio.to_thread(_route, question, " | ".join(memory))
+    calls += 1 + ("hedge" in who)
+    if route["intent"] == "off_topic" or route["confidence"] < 0.35:
+        ctx["trace"].append({"agent": "Gate", "detail": f"intent={route['intent']}, confidence={route['confidence']}: no analyst call", "ms": 0})
+        msg = ("I can only answer questions about this match: try 'Why does Northbridge depend on Ferrand?', "
+               "'What happens if Ferrand is marked out?' or 'Who wins from here?'")
+        out, _ = await asyncio.to_thread(grounding.translate, msg, language)
+        return dict(answer=out, language=language, source="router (gated)", route=route, trace=ctx["trace"], model_calls=calls + (language != "English"))
+
+    from agent_framework import AgentSession
+    session = AgentSession()
+    prompt = (f"Match minute: {minute}. Router: intent={route['intent']}, team={route['team']}, players={route['players']}.\n"
+              + (f"Relevant earlier conversation: {' | '.join(memory)}\n" if memory else "") + f"Question: {question}")
+    answer = await _analyse(prompt, session)
+    calls += 1
+    issues = grounding.check(answer, *ctx["outputs"], question, str(minute))
+    if not ctx["outputs"]:
+        issues.append("no tool was called, so nothing is grounded in data")
+    ctx["trace"].append({"agent": "Verifier", "detail": "passed" if not issues else "; ".join(issues), "ms": 0})
+    source = "ai"
+    if issues:  # self-reflection: one rewrite with the verifier's critique
+        answer = await _analyse("The verifier rejected your answer: " + "; ".join(issues) + ". Rewrite it using only "
+                                "numbers and directions exactly as the tools returned them (call tools if needed).", session)
+        calls += 1
+        issues = grounding.check(answer, *ctx["outputs"], question, str(minute))
+        if not ctx["outputs"]:
+            issues.append("no tool was called")
+        ctx["trace"].append({"agent": "Verifier", "detail": "passed after rewrite" if not issues else "failed again -> deterministic answer", "ms": 0})
+        if issues:
+            answer, source = _fallback(), "deterministic (verifier fallback)"
+        else:
+            source = "ai (self-corrected)"
+    if language != "English":
+        t0 = time.perf_counter()
+        answer, ok = await asyncio.to_thread(grounding.translate, answer, language)
+        calls += 1
+        ctx["trace"].append({"agent": "Translator (gpt-4.1-mini)", "detail": f"{language}: " + ("numbers preserved" if ok else "numbers changed -> kept English"),
+                             "ms": round((time.perf_counter() - t0) * 1000)})
+    return dict(answer=answer, language=language, source=source, route=route, trace=ctx["trace"], model_calls=calls)
+
+
+def warm_up():
+    """Sign in and wake the router and analyst deployments; failures are harmless (the hedge covers them)."""
+    for model in ("router", "chat"):
+        try:
+            _classify(model, ROUTER_PROMPT.replace("QUESTION_HERE", "Question: Who will win?"))
+        except Exception:
+            pass

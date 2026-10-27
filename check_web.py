@@ -62,7 +62,7 @@ try:
                 break
         except httpx.HTTPError:
             time.sleep(0.5)
-    page = httpx.get(f"{base}/", timeout=5)
+    page = httpx.get(f"{base}/", timeout=15)
     assert page.status_code == 200 and "Fault Lines" in page.text, "server also serves the page"
     time.sleep(1)  # let the clock run so a late joiner has history
     msgs = read()
@@ -128,6 +128,10 @@ try:
     hello = json.loads(read(want=1, path=feed["watch"])[0]["data"])
     assert len(hello["events"]) == 150 and hello["meta"]["seed"] == feed["seed"], "viewers join the user's feed"
     assert httpx.get(f"{base}/live", params={"feed": "nope"}, timeout=5).status_code == 404
+    # Regressions: bad input is a 4xx or a fresh join, never a crash
+    assert json.loads(read(headers={"Last-Event-ID": "abc"}, want=1)[0]["data"])["meta"], "unreadable resume id = fresh join"
+    assert httpx.post(f"{base}/matches", json={"text": '{"events": [1, 2]}'}, timeout=10).status_code == 422, "rows that are not records"
+    assert httpx.get(f"{base}/explain", params={"seed": 23, "minute": 130}, timeout=10).status_code == 409, "minute after full time"
 finally:
     proc.terminate()
 print("ok")

@@ -61,6 +61,8 @@ def match_state() -> dict:
     ev, m = c["events"], c["minute"]
     out = {"minute": m, "score": f"{score_at(ev, m * 60)['home']}-{score_at(ev, m * 60)['away']} (home-away)",
            "goals": [f"{int(e['t'] // 60)}' {e['player']} ({TEAMS[e['team']]['name']})" for e in ev if e["goal"]]}
+    if m < 15:  # the rolling window is not full yet
+        out["caveat"] = f"early read: based on the first {m} minutes only, so the fault lines are provisional"
     for t in TEAMS:
         v = team_view(ev, t, m)
         out[TEAMS[t]["name"]] = {

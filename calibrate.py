@@ -9,7 +9,6 @@ For published pass stats the same idea applies: fit to 2023/24, test on 2024/25 
 """
 import json
 import math
-from collections import defaultdict
 from pathlib import Path
 
 import numpy as np

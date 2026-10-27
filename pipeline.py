@@ -166,7 +166,7 @@ def standardise(raw_rows, log):
     """Map column names and values to the canonical model. Returns rows with parsed fields + raw copy."""
     if not raw_rows:
         raise DataError("no rows found")
-    headers = {_key(k) for r in raw_rows[:50] for k in (r or {})}
+    headers = {_key(k) for r in raw_rows[:50] if isinstance(r, dict) for k in r}
     mapping = {}
     for field, names in COLUMNS.items():
         hit = next((n for n in names if n in headers), None)
@@ -738,7 +738,7 @@ quarantine.csv lists every row that could not be used, with the reason. Nothing 
 
 def report_markdown(report):
     d = report["dimensions"]
-    out = [f"# Data quality report", "", f"**Quality {report['score']}/100 ({report['rating']})** · pipeline {report['pipeline_version']} · "
+    out = ["# Data quality report", "", f"**Quality {report['score']}/100 ({report['rating']})** · pipeline {report['pipeline_version']} · "
            f"{report['format']} · {report['rows']['received']} rows received, {report['rows']['clean_events']} clean events, "
            f"{report['rows']['quarantined']} quarantined, {report['rows']['out_of_scope']} out of scope", "",
            "| Dimension | Value |", "|---|---|"] + [f"| {k.replace('_', ' ')} | {v:.0%} |" for k, v in d.items()]

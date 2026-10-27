@@ -11,6 +11,7 @@ ponytail: in-process pub/sub, one replica. Scale-out path: Azure Web PubSub (or 
 """
 import asyncio
 import json
+import logging
 import os
 import secrets
 import threading
@@ -89,16 +90,19 @@ class Channel:
         i = 0
         while True:
             seed = DEMO_SEEDS[i % len(DEMO_SEEDS)]
-            self.start(match_meta(seed), seed)
-            t0 = time.monotonic()
-            for e in simulate(seed):
-                wait = e["t"] / SPEED - (time.monotonic() - t0)
-                if wait > 0:
-                    await asyncio.sleep(wait)
-                await self.ingest(e)
-            self.publish("fulltime", {"score": self.state["score"] if self.state else None})
-            await asyncio.sleep(15)
             i += 1
+            try:
+                self.start(match_meta(seed), seed)
+                t0 = time.monotonic()
+                for e in simulate(seed):
+                    wait = e["t"] / SPEED - (time.monotonic() - t0)
+                    if wait > 0:
+                        await asyncio.sleep(wait)
+                    await self.ingest(e)
+                self.publish("fulltime", {"score": self.state["score"] if self.state else None})
+            except Exception:  # a background task's exception is otherwise silent: the live feed would just stop
+                logging.exception("demo match %s failed; moving to the next one", seed)
+            await asyncio.sleep(15)
 
 
 channel = Channel()
@@ -113,7 +117,10 @@ async def live(request):
         return JSONResponse({"error": "unknown feed"}, status_code=404)
     ch = feeds[fid] if fid else channel
     q = asyncio.Queue(maxsize=200)
-    last = int(request.headers.get("last-event-id", 0) or 0)
+    try:
+        last = int(request.headers.get("last-event-id", 0) or 0)
+    except ValueError:  # unreadable resume id: treat as a fresh join
+        last = 0
 
     async def body():
         ch.subscribers.add(q)
@@ -222,8 +229,8 @@ def _parse_common(q):
     if not 1 <= minute <= 130:
         raise ValueError("invalid minute")
     events = _source(seed)[0]
-    if not isinstance(seed, int) and (not events or minute > events[-1]["t"] / 60 + 1):
-        raise LookupError("minute not played yet")
+    if not events or minute > events[-1]["t"] / 60 + 1:
+        raise LookupError("minute not played yet" if not isinstance(seed, int) else "the match ended before that minute")
     return seed, minute
 
 
@@ -517,9 +524,11 @@ async def health(_):
 @asynccontextmanager
 async def lifespan(_):
     task = asyncio.create_task(channel.run())
-    for seed in DEMO_SEEDS:  # warm the Monte Carlo rates so the first prediction question is instant
-        asyncio.get_running_loop().run_in_executor(None, agents._goal_rates, seed)
-    asyncio.get_running_loop().run_in_executor(None, gameplan.norms)  # role norms for player assessment
+    def warm():  # one at a time: parallel CPU-bound warm-ups starve the event loop and the first page load stalls
+        gameplan.norms()  # role norms for player assessment
+        for seed in DEMO_SEEDS:  # Monte Carlo rates, so the first prediction question is instant
+            agents._goal_rates(seed)
+    asyncio.get_running_loop().run_in_executor(None, warm)
     if ai.enabled():  # first model calls are slow (sign-in, cold deployments): take that hit before viewers do
         asyncio.get_running_loop().run_in_executor(None, agents.warm_up)
     yield

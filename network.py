@@ -136,7 +136,3 @@ def team_view(events, team, minute, window=15):
         players=players, spof=players[0],
         edges=[(a, b, d["weight"]) for a, b, d in G.edges(data=True)])
 
-
-def connectivity_timeline(events, team, upto, window=15):
-    return [(m, round(efficiency(pass_graph(events, team, max(0, m - window) * 60, m * 60)), 3))
-            for m in range(5, upto + 1)]

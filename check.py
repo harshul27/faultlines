@@ -1,4 +1,4 @@
-"""Self-check: one assertion per hackathon requirement it covers (see CRITERIA.md). Run: python check.py
+"""Self-check: one assertion per capability (live latency, cue schema, grounding, personalisation, game plan, own data). Run: python check.py
 Data realism vs held-out real data lives in validate.py.
 """
 import json

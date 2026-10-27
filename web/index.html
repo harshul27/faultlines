@@ -222,28 +222,6 @@
           <p class="small muted">StatsBomb files are converted automatically (first team in the file = home). JSON line-ups for a live feed: <code>{"home": {"name", "players": [{"name", "role"}]}, "away": {...}}</code>.</p>
         </details>
       </div>
-      <div class="card wide" id="mcp">
-        <div class="label">Connect your agent (MCP) <span class="muted">(the same match tools the analyst uses, for GitHub Copilot, Microsoft Foundry agents, Claude or any MCP client)</span></div>
-        <div class="grid2">
-          <div>
-            <h3>Server</h3>
-            <p class="muted small">Model Context Protocol over streamable HTTP. Read-only, no sign-in, no AI credits spent.</p>
-            <div class="copy-row"><code id="mcp-url"></code><button type="button" data-copy="mcp-url">Copy URL</button></div>
-            <h3>VS Code + GitHub Copilot</h3>
-            <p class="muted small">Save as <code>.vscode/mcp.json</code> (already in the repo), start the server, switch Copilot Chat to <b>Agent</b> mode and ask:
-              <i>"Who is Northbridge's fault line right now, and what happens if Riverside man-mark him?"</i></p>
-            <pre id="mcp-config" class="code"></pre>
-            <div class="plan-bar"><button type="button" data-copy="mcp-config">Copy config</button></div>
-          </div>
-          <div>
-            <h3>Tools</h3>
-            <div class="plan-bar"><button id="mcp-test" class="primary" type="button">Test connection</button>
-              <span id="mcp-status" class="small" aria-live="polite"></span></div>
-            <ul id="mcp-tools" class="mcp-tools small"></ul>
-            <p class="muted small">Every tool takes <code>match</code> (<code>live</code>, a demo seed, <code>upload:&lt;id&gt;</code> or <code>feed:&lt;id&gt;</code>) and <code>minute</code> (default: latest).</p>
-          </div>
-        </div>
-      </div>
     </section>
   </main>
   <dialog id="glossary" aria-labelledby="glossary-title">

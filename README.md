@@ -60,26 +60,6 @@ Viewers ask free-text questions on the Deep analysis tab (`POST /ask`). A small 
 
 Cost and safety: inputs validated, AI calls capped per day, answers rendered as text (never HTML), keyless managed identity.
 
-### MCP server: Fault Lines as a tool for any agent
-The same match tools are served over the **Model Context Protocol** (streamable HTTP) at `/mcp`, from the same
-Azure Container App (`mcp_server.py`). Any MCP client, such as **GitHub Copilot Agent Mode** in VS Code, a Microsoft
-Foundry agent or Claude, can query the live match, demo replays, or a user's own upload or live feed. Open this repo in VS
-Code (`.vscode/mcp.json` is included), switch Copilot Chat to Agent mode and ask, for example: *"Who is Northbridge's
-fault line right now, and what happens if Riverside man-mark him?"*
-
-| Tool | Returns |
-|---|---|
-| `list_matches` | Live demo match, demo replays, uploads and feeds |
-| `match_state` | Score, goals, each team's fault line, passing spread, progression, completion |
-| `player_profile`, `assess_player` | One player's network role, or their rating against the game plan |
-| `what_if_remove` | Counterfactual: what the team loses without a player |
-| `win_probability` | 10,000-run Monte Carlo from the current state |
-| `compare_windows`, `squad_assessment`, `plan_execution`, `zone_report` | Trends, squad vs plan, plan execution, zones |
-| `data_quality` | The cleaning pipeline's quality report for an upload or feed |
-
-Every tool is read-only and deterministic (annotated `readOnlyHint`), takes `match` (default `live`) and `minute`
-(default: latest), and makes no model calls, so it spends no AI credits.
-
 ## Game plan: every player judged against the coach's tactics
 The coach pastes the game plan on the Deep analysis tab: paragraphs, bullet points or a sheet
 (`player, position, instruction, priority`). `gameplan.py` turns it into weighted, measurable instructions and the

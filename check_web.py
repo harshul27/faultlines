@@ -128,20 +128,6 @@ try:
     hello = json.loads(read(want=1, path=feed["watch"])[0]["data"])
     assert len(hello["events"]) == 150 and hello["meta"]["seed"] == feed["seed"], "viewers join the user's feed"
     assert httpx.get(f"{base}/live", params={"feed": "nope"}, timeout=5).status_code == 404
-    # MCP: any agent can call the same match tools, on demo matches and on the user's own upload
-    import asyncio
-    from mcp import Client
-
-    async def mcp_check():
-        async with Client(f"{base}/mcp") as c:
-            names = {t.name for t in (await c.list_tools()).tools}
-            assert {"list_matches", "match_state", "what_if_remove", "squad_assessment", "data_quality"} <= names, names
-            st = json.loads((await c.call_tool("match_state", {"match": "23", "minute": 60})).content[0].text)
-            assert st["minute"] == 60 and "fault_line" in st["result"]["Northbridge FC"], st
-            q = json.loads((await c.call_tool("data_quality", {"match": f"upload:{up['id']}"})).content[0].text)
-            assert q["score"] == 100, q
-            assert (await c.call_tool("match_state", {"match": "999"})).is_error, "unknown match is a tool error"
-    asyncio.run(mcp_check())
 finally:
     proc.terminate()
 print("ok")

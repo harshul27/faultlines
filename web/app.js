@@ -344,7 +344,7 @@ function setTab(name) {
 }
 $("tab-live").onclick = () => setTab("live");
 $("tab-analysis").onclick = () => setTab("analysis");
-$("tab-data").onclick = () => { setTab("data"); if (!MCP.tested) testMcp(); };
+$("tab-data").onclick = () => setTab("data");
 for (const t of ["home", "away"]) $(`follow-${t}`).onclick = () => {
   S.follow = t; S.selected = "";
   $("follow-home").setAttribute("aria-checked", t === "home"); $("follow-away").setAttribute("aria-checked", t === "away");
@@ -694,31 +694,3 @@ async function liveAvailable() {
   else { $("source").value = pick ?? index[0].file; startReplay($("source").value); }
   requestAnimationFrame(frame);
 })();
-
-// ---------- Connect your agent (MCP) ----------
-const MCP = { url: `${LIVE || location.origin}/mcp`, tested: false };
-$("mcp-url").textContent = MCP.url;
-$("mcp-config").textContent = JSON.stringify({ servers: { faultlines: { type: "http", url: MCP.url } } }, null, 2);
-document.querySelectorAll("[data-copy]").forEach((b) => {
-  b.onclick = async () => {
-    const label = b.textContent;
-    try { await navigator.clipboard.writeText($(b.dataset.copy).textContent); b.textContent = "Copied"; }
-    catch { b.textContent = "Select and copy"; }
-    setTimeout(() => (b.textContent = label), 1500);
-  };
-});
-async function testMcp() {
-  MCP.tested = true;
-  const status = (t) => ($("mcp-status").textContent = t), t0 = performance.now();
-  status("Asking the server for its tools…");
-  try {
-    const r = await fetch(MCP.url, { method: "POST", headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }) });
-    const d = await r.json();
-    if (!r.ok || d.error) throw new Error(d.error?.message || `HTTP ${r.status}`);
-    const tools = d.result.tools;
-    $("mcp-tools").innerHTML = tools.map((t) => `<li><code>${esc(t.name)}</code> ${esc((t.description || "").split(". ")[0].replace(/\.$/, ""))}</li>`).join("");
-    status(`✓ Connected: ${tools.length} tools available (${Math.round(performance.now() - t0)} ms)`);
-  } catch (err) { status(`Couldn't reach the MCP server: ${err.message}`); MCP.tested = false; }
-}
-$("mcp-test").onclick = testMcp;

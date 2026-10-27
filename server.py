@@ -7,7 +7,6 @@
 Mirrors how live sports data is distributed: provider feed -> stream processor -> pub/sub fan-out -> clients.
 Late joiners get a state-of-play message; reconnecting clients resume from Last-Event-ID; slow clients are dropped.
 Users can bring their own data: upload a match (POST /matches) or open a live push feed (POST /feeds); see sources.py.
-Agents can call the match tools over MCP at /mcp (mcp_server.py).
 ponytail: in-process pub/sub, one replica. Scale-out path: Azure Web PubSub (or Redis) between processor and clients.
 """
 import asyncio
@@ -31,7 +30,6 @@ from starlette.staticfiles import StaticFiles
 import agents
 import ai
 import gameplan
-import mcp_server
 import pipeline
 import sources
 from explain import explain, facts, template
@@ -524,8 +522,7 @@ async def lifespan(_):
     asyncio.get_running_loop().run_in_executor(None, gameplan.norms)  # role norms for player assessment
     if ai.enabled():  # first model calls are slow (sign-in, cold deployments): take that hit before viewers do
         asyncio.get_running_loop().run_in_executor(None, agents.warm_up)
-    async with mcp_server.mcp.session_manager.run():
-        yield
+    yield
     task.cancel()
 
 
@@ -536,7 +533,6 @@ app = Starlette(
             Route("/matches/{id}/report", match_report), Route("/matches/{id}/package", match_package),
             Route("/feeds", feed_create, methods=["POST"]), Route("/feeds/{id}/events", feed_push, methods=["POST"]),
             Route("/feeds/{id}/report", feed_report), Route("/feeds/{id}/package", feed_package),
-            *mcp_server.app.routes,  # MCP (streamable HTTP) at /mcp
             Mount("/", StaticFiles(directory=Path(__file__).parent / "web", html=True))],
-    middleware=[Middleware(CORSMiddleware, allow_origins=os.getenv("ALLOW_ORIGIN", "*").split(","), allow_methods=["GET", "POST", "DELETE"], allow_headers=["content-type", "authorization", "mcp-protocol-version", "mcp-session-id"])],
+    middleware=[Middleware(CORSMiddleware, allow_origins=os.getenv("ALLOW_ORIGIN", "*").split(","), allow_methods=["GET", "POST"], allow_headers=["content-type", "authorization"])],
     lifespan=lifespan)

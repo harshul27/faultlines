@@ -158,8 +158,3 @@ dialog dt { font-weight: 700; margin-top: 8px; } dialog dd { margin: 2px 0 0; co
 .q-dims i { display: block; height: 7px; border-radius: 4px; background: var(--good); }
 .quality .err { color: var(--bad); font-weight: 700; }
 a.button { display: inline-block; margin-left: 4px; background: var(--accent); color: #111; border-radius: 8px; padding: 6px 12px; font-weight: 800; text-decoration: none; margin-top: 6px; }
-.copy-row { display: flex; gap: 8px; align-items: center; margin: 6px 0 4px; }
-.copy-row code { flex: 1; min-width: 0; overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font-size: 12px; }
-.copy-row button { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; font-size: 13px; white-space: nowrap; }
-.mcp-tools { list-style: none; padding: 0; margin: 8px 0; display: grid; gap: 4px; }
-.mcp-tools code { color: var(--accent); }

@@ -112,6 +112,31 @@ time order. Uploaded matches get a generic starter game plan, which users replac
 Under the hood, `match.using(lineups)` swaps in the user's squads for that request only, so every analysis, the agents
 included, runs unchanged on real data and never touches the demo.
 
+## Data pipeline: from noisy outside data to clean, accountable data
+Outside data is always noisy, so every upload and every live-feed event goes through [pipeline.py](pipeline.py):
+
+| Stage | What happens |
+|---|---|
+| Ingest | Any CSV dialect (comma, semicolon, tab, pipe), UTF-8 or Windows-1252, Fault Lines JSON, StatsBomb events; size and row limits |
+| Standardise | Column names mapped (`Player Name`, `Receiver`, `start_x`, `Half`...), values normalised (`Complete`/`Incomplete`, `TRUE`, decimal commas, `mm:ss` and per-half clocks, club names as team labels), names cleaned of markup |
+| Validate | Every row checked; unrepairable rows go to **quarantine with the reason**; fouls, substitutions and other non-pass/shot events are counted as **out of scope**, not errors |
+| Clean | Time order restored, exact and near duplicates removed, coordinate scale detected (0-1, 0-100, metres, 120x80) and converted, attack direction fixed per team and half (fixed-frame data), spelling variants of a name merged, a player recorded for both teams resolved |
+| Impute | What providers derive from neighbouring events: missing receiver, pass outcome or end point from the next event; location from the previous pass; xG from shot location; positions from where players were on the ball. **Every filled value is flagged on its event** |
+| Quality gate | A score (validity, completeness, uniqueness, consistency, frame confidence) and plain-language caveats about what it means for the analysis; data too broken to analyse is stopped, and the report says why |
+| Store and deliver | A **data package** (.zip) for the user: clean events (CSV + JSON, each with its source row and imputed fields), quarantine, quality report (JSON + Markdown), manifest (pipeline version, input SHA-256, file hashes), data dictionary, and the analysis (fault lines by minute, player assessments). The server keeps nothing on disk |
+
+Live feeds use the same rules one batch at a time (`pipeline.LiveCleaner`): late or bad events are quarantined instead
+of failing the batch, and a pass missing its receiver waits for the next event (one-event look-ahead, as live providers do).
+
+**Robustness, measured** (`python evaluate.py --only-pipeline`, [reports/evaluation.md](reports/evaluation.md)): 20 clean
+matches are turned into messy provider files by [noise.py](noise.py) (fixed frame at 120x80, per-half clocks, renamed
+columns, decimal commas, duplicates, disorder, missing receivers / outcomes / end points / xG, name variants, missing
+roles, out-of-scope and broken rows, markup) and cleaned. Every real event is recovered, final scores are identical, the
+fault line agrees 100% of the time (99.7% at double noise), fragility is unchanged, plan-fit rankings correlate 0.997,
+97% of broken rows are quarantined and 0.01% of valid rows are wrongly set aside. These numbers are optimistic: in the
+generator the receiver always makes the next touch, so inferred receivers are exact; real matches break that sometimes.
+A messy sample is on the Your data tab to try it.
+
 ## How far to trust each part: evaluation
 `python evaluate.py [--ai]` tests the judgement-based parts against pass bars fixed in code before the first run, on
 held-out simulated matches, and writes [reports/evaluation.md](reports/evaluation.md). Earlier runs and every change

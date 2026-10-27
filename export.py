@@ -23,4 +23,6 @@ if __name__ == "__main__":
     ev, teams = list(simulate(7)), {s: {"name": DEMO_TEAMS[s]["name"], "roles": squad(s)} for s in ("home", "away")}
     (OUT / "sample-match.json").write_text(json.dumps(sources.to_native(ev, teams), separators=(",", ":")))
     (OUT / "sample-match.csv").write_text(sources.to_csv(ev, teams))
+    import noise  # the same match as a provider might send it: shows the cleaning pipeline at work
+    (OUT / "sample-messy.csv").write_text(noise.noisy_csv(ev, teams, seed=7)[0], encoding="utf-8")
     print("wrote samples")

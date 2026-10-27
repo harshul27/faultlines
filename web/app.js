@@ -557,14 +557,21 @@ $("up-go").onclick = async () => {
   $("up-go").disabled = true;
   status("Reading and analysing your match… a full match takes up to a minute.");
   try {
+    const buf = await f.arrayBuffer();
+    let text, encoding = "utf-8";
+    try { text = new TextDecoder("utf-8", { fatal: true }).decode(buf); }
+    catch { text = new TextDecoder("windows-1252").decode(buf); encoding = "windows-1252"; }  // older exports
+    $("up-report").hidden = true;
     const r = await fetch(`${LIVE}/matches`, { method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(300000),
-      body: JSON.stringify({ text: await f.text(), format: $("up-format").value, home: $("up-home").value, away: $("up-away").value }) });
+      body: JSON.stringify({ text, encoding, format: $("up-format").value, home: $("up-home").value, away: $("up-away").value,
+        scale: $("up-scale").value, direction: $("up-direction").value }) });
     const d = await r.json();
+    if (d.report) showReport(d.report, r.ok ? d.id : null);
     if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
     const sc = d.summary.score;
-    status(`Done: ${d.summary.events} events over ${d.summary.minutes} minutes. ${d.summary.warnings.join(" ")}`);
+    status(`Done: ${d.summary.events} clean events over ${d.summary.minutes} minutes. Quality ${d.report.score}/100.`);
     addSource(d.seed, `Your match: ${d.teams.home.name} ${sc.home}-${sc.away} ${d.teams.away.name}`);
-    openSource(d.seed); setTab("live");
+    openSource(d.seed);  // the match loads behind the report; "Open the match" switches to it
   } catch (err) { status(`Couldn't analyse that file: ${err.message}`); } finally { $("up-go").disabled = false; }
 };
 
@@ -585,6 +592,7 @@ $("feed-open").onclick = async () => {
     $("feed-id").textContent = d.id;
     $("feed-curl").textContent = `curl -X POST ${base}${d.push} \\\n  -H "Authorization: Bearer ${d.token}" \\\n  -H "Content-Type: application/json" \\\n  -d '${JSON.stringify(example)}'`;
     $("feed-info").hidden = false;
+    $("feed-package").href = `${base}${d.package}`;
     status("Feed open.");
     addSource(d.seed, `Your live feed: ${d.teams.home.name} v ${d.teams.away.name}`);
   } catch (err) { status(`Couldn't open a feed: ${err.message}`); }
@@ -613,6 +621,50 @@ $("feed-sim").onclick = async () => {  // stands in for the user's system: strea
   }, 500);
   if (S.feed !== FEED.id) $("feed-watch").click();
 };
+function showReport(rep, id) {  // the quality report, as text nodes only
+  const box = $("up-report"), dims = rep.dimensions, row = rep.rows;
+  const head = node("div", "q-head");
+  head.append(node("b", `q-score ${rep.score >= 90 ? "good" : rep.score >= 75 ? "warn" : "bad"}`, `${rep.score}/100`),
+    node("span", "", `${rep.rating} · ${row.received} rows in · ${row.clean_events} clean events · ${row.quarantined} set aside · ${row.out_of_scope} out of scope`));
+  const bars = node("div", "q-dims");
+  for (const [k, v] of Object.entries(dims)) {
+    const d = node("div"), i = node("i");
+    i.style.width = `${Math.round(v * 100)}%`;
+    d.append(node("span", "", k.replace("_", " ")), i, node("b", "", `${Math.round(v * 100)}%`));
+    bars.append(d);
+  }
+  const list = (title, items) => {
+    if (!items.length) return [];
+    const ul = node("ul"); ul.append(...items.map((t) => node("li", "", t)));
+    return [node("div", "label", title), ul];
+  };
+  const fixes = rep.fixes.map((f) => `${f.what} (${f.count})${f.examples.length ? `: ${f.examples.slice(0, 2).join(", ")}` : ""}`);
+  box.replaceChildren(head, bars,
+    ...list("What the pipeline did", [...fixes, ...rep.notes].slice(0, 16)),
+    ...list("Set aside (in quarantine.csv)", Object.entries(rep.quarantine_reasons).map(([k, v]) => `${k}: ${v}`)),
+    ...list("Out of scope, not errors", Object.entries(rep.out_of_scope).map(([k, v]) => `${k}: ${v}`)),
+    ...list("What this means for the analysis", rep.caveats),
+    ...(rep.gate && !rep.gate.passed ? [node("p", "err", `Not analysed: ${rep.gate.reason}.`)] : []));
+  if (id) {
+    const a = node("a", "button", "Download data package (.zip)");
+    a.href = `${LIVE}/matches/${encodeURIComponent(id)}/package`; a.download = "";
+    const p = node("p", "muted small", "Clean data (CSV + JSON), quarantine, this report, a manifest with the file's fingerprint, a data dictionary, and the analysis (fault lines by minute, player assessments). The server keeps uploads in memory only: this is your copy.");
+    const open = node("button", "primary", "Open the match");
+    open.type = "button"; open.onclick = () => setTab("live");
+    const bar = node("div", "plan-bar"); bar.append(open, a);
+    box.append(bar, p);
+  }
+  box.hidden = false;
+}
+setInterval(async () => {  // live feed quality, while the Your data tab is open
+  if (!FEED.id || $("panel-data").hidden) return;
+  try {
+    const d = await (await fetch(`${LIVE}/feeds/${FEED.id}/report`)).json();
+    $("feed-quality").textContent = `Quality ${d.score}/100 · received ${d.live.received} · clean ${d.live.clean_events} · set aside ${d.live.quarantined}`
+      + (d.live.held_for_next_event ? " · 1 pass waiting for the next event" : "")
+      + (Object.keys(d.live.quarantine_reasons).length ? ` (${Object.entries(d.live.quarantine_reasons).map(([k, v]) => `${k}: ${v}`).join("; ")})` : "");
+  } catch { /* next tick */ }
+}, 4000);
 $("welcome-close").onclick = () => { $("welcome").hidden = true; saved.set("fl-welcome-done", 1); };
 $("help").onclick = () => $("glossary").showModal();
 

@@ -150,16 +150,31 @@ agents.CTX.get()["outputs"].clear()
 assert agents._gather_matchups("home", ["Callum Reyes"])[0]["faced_by"] == ["Sami Okafor (LB)"], "who faces an opponent is a fact"
 print("validation fixes ok")
 
-# Bring your own match: adapters round-trip, StatsBomb shape, isolation from the demo
+# Bring your own match: the cleaning pipeline, adapters, isolation from the demo, robustness to realistic noise
+import noise
+import pipeline
 import sources
 from match import DEMO_TEAMS, using
 
 demo_teams = {s: {"name": DEMO_TEAMS[s]["name"], "roles": gp.squad(s)} for s in ("home", "away")}
-lu, evs, summ = sources.parse(sources.to_csv(ev, demo_teams), "csv", "Test United", "Sample City")
+lu, evs, quar, rep = sources.parse(sources.to_csv(ev, demo_teams), "csv", "Test United", "Sample City")
+assert rep["score"] == 100 and not quar and not rep["fixes"], "clean data passes untouched"
 with using(lu):
     assert TEAMS["home"]["name"] == "Test United" and team_view(evs, "home", 60)["spof"]["name"] == HUB[1], "CSV round trip keeps the analysis"
 assert TEAMS["home"]["name"] == DEMO_TEAMS["home"]["name"], "a user's match never leaks into the demo"
-assert sources.parse(json.dumps(sources.to_native(evs, lu)))[2]["events"] == summ["events"], "native JSON round trip"
+assert len(sources.parse(json.dumps(sources.to_native(evs, lu)))[1]) == len(evs), "native JSON round trip"
+
+text, truth = noise.noisy_csv(ev, demo_teams, seed=3)
+nl, ne, nq, nr = sources.parse(text)
+assert len(ne) == len(ev) and score_at(ne, 1e9) == score_at(ev, 1e9), "noisy file: every real event recovered, same score"
+assert truth["broken_rows"] <= {q["source_row"] for q in nq} and len(nq) == len(truth["broken_rows"]), "broken rows quarantined, nothing else"
+assert nr["rows"]["out_of_scope"] == truth["out_of_scope"] and 75 <= nr["score"] < 100, "noise is detected and reported"
+assert nl["home"]["name"] == DEMO_TEAMS["home"]["name"] and all("<" not in n for s in ("home", "away") for n in nl[s]["players"]), "names cleaned"
+with using(nl):
+    assert all(team_view(ne, s, m)["spof"]["name"] == team_view(ev, s, m)["spof"]["name"] for s in ("home", "away") for m in (30, 60, 75)), \
+        "fault lines survive the noise"
+assert all(e["imputed"] == [] or set(e["imputed"]) <= {"success", "recipient", "end_location", "xg", "goal", "location"} for e in ne), "provenance flags"
+
 sb = [{"type": {"name": "Starting XI"}, "team": {"name": "Alpha"}, "tactics": {"lineup": [
           {"player": {"name": "A One"}, "position": {"name": "Goalkeeper"}}, {"player": {"name": "A Two"}, "position": {"name": "Center Forward"}}]}},
       {"type": {"name": "Starting XI"}, "team": {"name": "Beta"}, "tactics": {"lineup": [
@@ -168,13 +183,32 @@ sb = [{"type": {"name": "Starting XI"}, "team": {"name": "Alpha"}, "tactics": {"
        "location": [12, 40], "pass": {"end_location": [60, 20], "recipient": {"name": "A Two"}}},
       {"type": {"name": "Shot"}, "team": {"name": "Alpha"}, "player": {"name": "A Two"}, "minute": 0, "second": 9, "period": 1,
        "location": [108, 40], "shot": {"statsbomb_xg": 0.31, "outcome": {"name": "Goal"}}}]
-sl, se, ss = sources.parse(json.dumps(sb))
-assert sl["home"]["roles"] == {"A One": "GK", "A Two": "ST"} and se[0]["x"] == 10.0 and se[0]["end_y"] == 25.0, "StatsBomb mapping"
-assert ss["score"] == {"home": 1, "away": 0} and se[1]["xg"] == 0.31, "provider xG and goals kept"
-for bad_input in ('{"teams": {}, "events": []}', "t,team\n1,home", "[1, 2]", '{"teams": {"home": {"name": "<b>", "players": [{"name": "x", "role": "GK"}]}}, "events": [{}]}'):
+rows, teams = sources.from_statsbomb(sb)
+assert teams["home"]["players"][1] == {"name": "A Two", "role": "ST"} and rows[0]["x"] == 10.0 and rows[0]["end_y"] == 25.0, "StatsBomb mapping"
+assert rows[1]["xg"] == 0.31 and rows[1]["goal"] is True, "provider xG and goals kept"
+try:
+    sources.parse(json.dumps(sb))
+    raise AssertionError("a 2-event file must fail the quality gate")
+except sources.DataError as e:
+    assert e.report and not e.report["gate"]["passed"], "a failed gate still returns the report"
+for bad_input in ('{"teams": {}, "events": []}', "t,team\n1,home", "[1, 2]"):
     try:
         sources.parse(bad_input)
         raise AssertionError(f"accepted bad input {bad_input[:30]}")
     except sources.DataError:
         pass
+
+live = pipeline.LiveCleaner(lu)
+out = live.push([{**e, "recipient": None} if i == 3 else e for i, e in enumerate(sources.to_native(evs, lu)["events"][:40])])
+assert len(out) == 40 and live.report()["held_for_next_event"] == 0, "live: a pass missing its receiver waits only for the next event"
+nat = sources.to_native(evs, lu)["events"]
+assert live.push([{**nat[40], "recipient": None}]) == [] and live.report()["held_for_next_event"] == 1, "live: held until the next event"
+assert len(live.push([nat[41]])) == 2, "live: released when it arrives"
+assert out[3]["recipient"] == evs[3]["recipient"] and out[3]["imputed"] == ["recipient"], "live: receiver inferred from the next event"
+assert live.push([nat[0]]) == [] and live.report()["quarantined"] == 1, "live: late events quarantined"
+pkg = pipeline.package(nl, ne, nq, nr, pipeline.fingerprint(text))
+import zipfile, io
+names = set(zipfile.ZipFile(io.BytesIO(pkg)).namelist())
+assert {"clean_events.csv", "clean_events.json", "quarantine.csv", "quality_report.json", "quality_report.md", "manifest.json",
+        "DATA_DICTIONARY.md"} <= names, "the package gives the user everything back"
 print("bring your own data ok")

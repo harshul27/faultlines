@@ -105,7 +105,15 @@ try:
     ex = httpx.get(f"{base}/explain", params={"seed": up["seed"], "minute": 70, "team": "away"}, timeout=30).json()
     assert "Sample City" in ex["text"] or ex["text"], "explanations use the uploaded names"
     bad = httpx.post(f"{base}/matches", json={"text": "t,team,type,player,player_role\n1,home,pass,<img src=x>,ST", "format": "csv"}, timeout=10)
-    assert bad.status_code == 422 and "valid name" in bad.json()["error"], "markup in names is rejected"
+    assert bad.status_code == 422 and bad.json()["report"]["gate"]["passed"] is False, "a failed quality gate returns the report"
+    rep = httpx.get(f"{base}/matches/{up['id']}/report", timeout=10).json()
+    assert rep["score"] == 100 and rep["pipeline_version"], "quality report"
+    pkg = httpx.get(f"{base}/matches/{up['id']}/package", timeout=120)
+    assert pkg.headers["content-type"] == "application/zip" and "attachment" in pkg.headers["content-disposition"]
+    import io, zipfile
+    files = set(zipfile.ZipFile(io.BytesIO(pkg.content)).namelist())
+    assert {"clean_events.csv", "quarantine.csv", "quality_report.md", "manifest.json", "analysis/fault_lines_by_minute.csv",
+            "analysis/player_assessment_full_time.csv"} <= files, files
     # Live push feed from the user's own source: token required, time order enforced, viewers get SSE
     native = json.loads((ROOT / "web/data/sample-match.json").read_text())
     feed = httpx.post(f"{base}/feeds", json={"teams": native["teams"]}, timeout=10).json()
@@ -113,7 +121,10 @@ try:
     assert httpx.post(f"{base}{feed['push']}", json=evs, timeout=10).status_code == 401, "pushing needs the token"
     pushed = httpx.post(f"{base}{feed['push']}", json=evs, headers=auth, timeout=120).json()
     assert pushed["accepted"] == 150, pushed
-    assert httpx.post(f"{base}{feed['push']}", json=evs[:1], headers=auth, timeout=10).status_code == 422, "time order"
+    late = httpx.post(f"{base}{feed['push']}", json=evs[:1], headers=auth, timeout=10).json()
+    assert late["accepted"] == 0 and late["quarantined"] == 1, "late events are quarantined, not fatal"
+    assert httpx.get(f"{base}{feed['report']}", timeout=10).json()["live"]["quarantined"] == 1, "live quality report"
+    assert httpx.get(f"{base}{feed['package']}", timeout=120).headers["content-type"] == "application/zip", "feed package"
     hello = json.loads(read(want=1, path=feed["watch"])[0]["data"])
     assert len(hello["events"]) == 150 and hello["meta"]["seed"] == feed["seed"], "viewers join the user's feed"
     assert httpx.get(f"{base}/live", params={"feed": "nope"}, timeout=5).status_code == 404

@@ -159,6 +159,38 @@
    "result": "4.8 / 5",
    "note": "gpt-4.1-mini grades each answer against its own trace. A model judging a model: a screen, not proof; spot-check by hand.",
    "what_it_shows": "Real coaches should grade a sample before trusting this."
+  },
+  {
+   "test": "Data pipeline: real events recovered, same result",
+   "passed": true,
+   "bar": ">= 99% of events, identical final score, no gate failure",
+   "result": "100.00% of events, score identical in 100% of 20 matches At double noise: events 100.0%, fault line 100%, quality 97-97.",
+   "note": "Noise level 1 on each of the matches; the clean match is the truth.",
+   "what_it_shows": "Shows the pipeline undoes the kinds of mess real provider files have, and the analysis survives it. These results are optimistic: in this generator the receiver always makes the next touch, so receivers inferred from the next event are exact; in real matches deflections and 50-50s break that, so expect lower agreement. Real files can also be messy in ways this generator does not imitate (missing minutes, wrong player IDs): the quality report and its caveats are the guard there. Some broken rows (e.g. a missing location) are legitimately repaired from the previous pass rather than quarantined, which counts against the catch rate here."
+  },
+  {
+   "test": "Data pipeline: analysis survives the noise",
+   "passed": true,
+   "bar": "fault line agrees >= 90%, fragility error <= 0.03, plan fit rho >= 0.85",
+   "result": "fault line 100%, fragility error 0.0, plan fit rho 0.997",
+   "note": "Fault lines every 10 minutes for both teams; fragility of every player at 60'; plan-fit ranking at 90'.",
+   "what_it_shows": "Shows the pipeline undoes the kinds of mess real provider files have, and the analysis survives it. These results are optimistic: in this generator the receiver always makes the next touch, so receivers inferred from the next event are exact; in real matches deflections and 50-50s break that, so expect lower agreement. Real files can also be messy in ways this generator does not imitate (missing minutes, wrong player IDs): the quality report and its caveats are the guard there. Some broken rows (e.g. a missing location) are legitimately repaired from the previous pass rather than quarantined, which counts against the catch rate here."
+  },
+  {
+   "test": "Data pipeline: quarantine is precise",
+   "passed": true,
+   "bar": "catches >= 95% of broken rows, sets aside <= 1% of valid rows",
+   "result": "caught 97%, wrongly set aside 0.01%",
+   "note": "Broken rows: unreadable time, missing location, unknown team, coordinates far off the pitch.",
+   "what_it_shows": "Shows the pipeline undoes the kinds of mess real provider files have, and the analysis survives it. These results are optimistic: in this generator the receiver always makes the next touch, so receivers inferred from the next event are exact; in real matches deflections and 50-50s break that, so expect lower agreement. Real files can also be messy in ways this generator does not imitate (missing minutes, wrong player IDs): the quality report and its caveats are the guard there. Some broken rows (e.g. a missing location) are legitimately repaired from the previous pass rather than quarantined, which counts against the catch rate here."
+  },
+  {
+   "test": "Data pipeline: the quality score sees the noise",
+   "passed": true,
+   "bar": "noisy files score below 100 (clean = 100) and >= 75 (usable)",
+   "result": "98-99 (mean 98.7)",
+   "note": "The score is how far to trust the cleaned data.",
+   "what_it_shows": "Shows the pipeline undoes the kinds of mess real provider files have, and the analysis survives it. These results are optimistic: in this generator the receiver always makes the next touch, so receivers inferred from the next event are exact; in real matches deflections and 50-50s break that, so expect lower agreement. Real files can also be messy in ways this generator does not imitate (missing minutes, wrong player IDs): the quality report and its caveats are the guard there. Some broken rows (e.g. a missing location) are legitimately repaired from the previous pass rather than quarantined, which counts against the catch rate here."
   }
  ],
  "raw": {
@@ -668,6 +700,36 @@
     "seconds": 1.5,
     "answer": "I can only answer questions about this match and your game plan: try 'Who should I take off?', 'Is our game plan working?' or 'What happens if Ferrand is marked out?'"
    }
-  ]
+  ],
+  "pipeline": {
+   "1.0": {
+    "matches": 20,
+    "gate_failed": 0,
+    "events_recovered": 1.0,
+    "score_same": 1.0,
+    "faultline_agreement": 1.0,
+    "fragility_mae": 0.0,
+    "planfit_rho_median": 0.997,
+    "quarantine_recall": 0.97,
+    "false_quarantine": 0.0001,
+    "quality_min": 98,
+    "quality_max": 99,
+    "quality_mean": 98.7
+   },
+   "2.0": {
+    "matches": 20,
+    "gate_failed": 0,
+    "events_recovered": 1.0001,
+    "score_same": 1.0,
+    "faultline_agreement": 0.997,
+    "fragility_mae": 0.0,
+    "planfit_rho_median": 0.992,
+    "quarantine_recall": 0.91,
+    "false_quarantine": 0.0004,
+    "quality_min": 97,
+    "quality_max": 97,
+    "quality_mean": 97.0
+   }
+  }
  }
 }

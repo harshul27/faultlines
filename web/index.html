@@ -170,17 +170,24 @@
         <div class="grid2">
           <div>
             <h3>Upload a match</h3>
-            <p class="muted small">Fault Lines CSV or JSON, or a StatsBomb events file. Start from a sample:
-              <a href="data/sample-match.csv" download>sample CSV</a> · <a href="data/sample-match.json" download>sample JSON</a></p>
+            <p class="muted small">Any CSV (comma, semicolon or tab; column names and spellings vary), Fault Lines JSON, or a StatsBomb
+              events file. Messy is fine: it is cleaned, and you get a quality report and the clean data back. Start from a sample:
+              <a href="data/sample-match.csv" download>sample CSV</a> · <a href="data/sample-match.json" download>sample JSON</a> · <a href="data/sample-messy.csv" download>messy sample (to see the cleaning)</a></p>
             <div class="form">
               <label>File <input id="up-file" type="file" accept=".json,.csv,text/csv,application/json"></label>
               <label>Format <select id="up-format"><option value="auto">Detect automatically</option><option value="csv">Fault Lines CSV</option>
                 <option value="native">Fault Lines JSON</option><option value="statsbomb">StatsBomb events JSON</option></select></label>
               <label>Home team <input id="up-home" maxlength="60" placeholder="CSV files only"></label>
               <label>Away team <input id="up-away" maxlength="60" placeholder="CSV files only"></label>
+              <label>Coordinates <select id="up-scale"><option value="auto">Detect automatically</option><option value="percent">0-100</option>
+                <option value="unit">0-1</option><option value="metres">metres (105 x 68)</option><option value="statsbomb">120 x 80</option></select></label>
+              <label>Attack direction <select id="up-direction"><option value="auto">Detect automatically</option>
+                <option value="attacking">Each team attacks left to right</option><option value="fixed_home_right">Fixed pitch: home attacks right first</option>
+                <option value="fixed_home_left">Fixed pitch: home attacks left first</option></select></label>
             </div>
             <div class="plan-bar"><button id="up-go" class="primary" type="button">Analyse my match</button></div>
             <p id="up-status" class="small" aria-live="polite"></p>
+            <div id="up-report" class="quality" hidden></div>
           </div>
           <div>
             <h3>Connect a live source</h3>
@@ -193,7 +200,10 @@
               <pre id="feed-curl" class="code"></pre>
               <div class="plan-bar"><button id="feed-watch" class="primary" type="button">Watch this feed</button>
                 <button id="feed-sim" type="button">Simulate my source</button></div>
-              <p class="muted small">Keep the token private: anyone with it can push to your feed. Feeds close after 3 idle hours.</p>
+              <p id="feed-quality" class="small"></p>
+              <p class="muted small">Every event is cleaned as it arrives (same rules as uploads); bad or late events are set aside, never
+                fatal. Keep the token private: anyone with it can push to your feed. Feeds close after 3 idle hours.
+                <a id="feed-package" href="#" download>Download the feed's data package</a></p>
             </div>
           </div>
         </div>

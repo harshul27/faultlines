@@ -23,13 +23,14 @@ from pathlib import Path
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
-from starlette.responses import JSONResponse, StreamingResponse
+from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 import agents
 import ai
 import gameplan
+import pipeline
 import sources
 from explain import explain, facts, template
 from feed import DEMO_SEEDS, compact_event, match_meta, snapshot, timeline, user_meta
@@ -337,24 +338,32 @@ async def assess_route(request):
     return JSONResponse(await asyncio.to_thread(run))
 
 
+SCALE_OPTIONS = ("auto", "percent", "unit", "metres", "statsbomb")
+DIRECTION_OPTIONS = ("auto", "attacking", "fixed_home_right", "fixed_home_left")
+
+
 async def upload_route(request):
-    """POST /matches {text, format: auto|native|csv|statsbomb, home, away}: a user's match -> analysed timeline.
-    Kept in this server's memory only (newest 20), never written to disk."""
+    """POST /matches {text, format, home, away, scale, direction, encoding}: a user's match through the cleaning pipeline
+    (pipeline.py) -> analysed timeline + quality report. Kept in this server's memory only (newest 20), never on disk."""
     if int(request.headers.get("content-length") or 0) > 9_000_000:
         return JSONResponse({"error": "file too large (8 MB limit)"}, status_code=413)
     try:
         body = await request.json()
         text, fmt = body["text"], body.get("format", "auto")
-        home, away = str(body.get("home") or "Home"), str(body.get("away") or "Away")
-        if not isinstance(text, str) or fmt not in ("auto", "native", "csv", "statsbomb"):
+        scale, direction = body.get("scale", "auto"), body.get("direction", "auto")
+        names = [str(body.get(k) or "").strip() or None for k in ("home", "away")]
+        encoding = str(body.get("encoding", "utf-8"))[:20]
+        if not isinstance(text, str) or fmt not in ("auto", "native", "csv", "statsbomb") or scale not in SCALE_OPTIONS \
+                or direction not in DIRECTION_OPTIONS:
             raise ValueError
     except (ValueError, KeyError, TypeError, AttributeError):
-        return JSONResponse({"error": "send {text, format} with the file's contents"}, status_code=400)
+        return JSONResponse({"error": "send {text, format, scale, direction} with the file's contents"}, status_code=400)
     async with _processing:
         try:
-            lineups, events, summary = await asyncio.to_thread(sources.parse, text, fmt, home, away)
-        except sources.DataError as e:
-            return JSONResponse({"error": str(e)}, status_code=422)
+            lineups, events, quarantine, report = await asyncio.to_thread(
+                sources.parse, text, fmt, names[0], names[1], scale, direction, encoding)
+        except sources.DataError as e:  # the user still gets the report, so they can see what to fix
+            return JSONResponse({"error": str(e), "report": e.report}, status_code=422)
         seed = f"upload:{lineups['id']}"
 
         def build():
@@ -363,8 +372,11 @@ async def upload_route(request):
         tl = await asyncio.to_thread(build)
     while len(uploads) >= MAX_UPLOADS:
         uploads.pop(next(iter(uploads)))
-    uploads[lineups["id"]] = {"lineups": lineups, "events": events, "timeline": tl, "summary": summary}
-    return JSONResponse({"id": lineups["id"], "seed": seed, "summary": summary, "teams": tl["meta"]["teams"]})
+    uploads[lineups["id"]] = {"lineups": lineups, "events": events, "timeline": tl, "quarantine": quarantine,
+                              "report": report, "input": pipeline.fingerprint(text)}
+    return JSONResponse({"id": lineups["id"], "seed": seed, "report": report, "teams": tl["meta"]["teams"],
+                         "summary": {"events": len(events), "minutes": int(events[-1]["t"] // 60) + 1,
+                                     "score": tl["snapshots"][-1]["score"] if tl["snapshots"] else {"home": 0, "away": 0}}})
 
 
 async def match_route(request):
@@ -372,29 +384,80 @@ async def match_route(request):
     return JSONResponse(u["timeline"]) if u else JSONResponse({"error": "unknown match (uploads live in memory)"}, status_code=404)
 
 
+async def match_report(request):
+    u = uploads.get(request.path_params["id"])
+    return JSONResponse(u["report"]) if u else JSONResponse({"error": "unknown match"}, status_code=404)
+
+
+def _analysis_files(lineups, events, snapshots=None):
+    """Analysis outputs for the package: fault lines minute by minute, and every player against the default plan."""
+    with using(lineups):
+        end = int(events[-1]["t"] // 60) + 1
+        lines = ["minute,team,fault_line,network_share,passing_spread,progressive_passes_last_15,pass_completion_last_15"]
+        views = ([(s["minute"], t, s["teams"][t]) for s in snapshots for t in ("home", "away")] if snapshots else
+                 [(m, t, team_view(events, t, m)) for m in range(5, end + 1, 5) for t in ("home", "away")])
+        for m, t, v in views:
+            spof = v["spof"]["name"] if isinstance(v["spof"], dict) else v["spof"]
+            share = next(p["fragility"] for p in v["players"] if p["name"] == spof)
+            lines.append(f"{int(m)},{t},{spof},{share},{v['efficiency']},{v['progressive']},{v['completion']}")
+        rows = ["team,player,role,plan_fit,plan_fit_last_15,form,load_vs_plan,flags,strengths,concerns"]
+        q = lambda x: '"' + str(x).replace('"', "'") + '"'
+        for t in ("home", "away"):
+            for r in gameplan.assess(events, t, end, gameplan.default_plan(t)):
+                rows.append(",".join([t, q(r["player"]), r["role"], str(r["plan_fit"]), str(r["plan_fit_last_15"]), r["form"],
+                                      r["load_vs_plan"], q("; ".join(r["flags"])), q("; ".join(r["strengths"])), q("; ".join(r["concerns"]))]))
+    return {"analysis/fault_lines_by_minute.csv": "\n".join(lines) + "\n",
+            "analysis/player_assessment_full_time.csv": "\n".join(rows) + "\n"}
+
+
+def _download(data, name):
+    return Response(data, media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+async def match_package(request):
+    """GET /matches/{id}/package: everything back to the user, so their data never has to live on this server."""
+    u = uploads.get(request.path_params["id"])
+    if u is None:
+        return JSONResponse({"error": "unknown match (uploads live in memory; upload it again)"}, status_code=404)
+
+    def build():
+        extra = _analysis_files(u["lineups"], u["events"], u["timeline"]["snapshots"])
+        return pipeline.package(u["lineups"], u["events"], u["quarantine"], u["report"], u["input"], extra)
+    return _download(await asyncio.to_thread(build), f"faultlines-{request.path_params['id']}.zip")
+
+
 async def feed_create(request):
-    """POST /feeds {teams}: open a live feed for a user's own data source. Returns a secret token for pushing."""
+    """POST /feeds {teams, coordinates: {scale, direction}}: open a live feed for a user's own data source.
+    Returns a secret token for pushing. Events are cleaned as they arrive (pipeline.LiveCleaner)."""
     try:
-        lineups = sources.lineup((await request.json()).get("teams"))
+        body = await request.json()
+        lineups = sources.lineup(body.get("teams"))
+        coords = body.get("coordinates") or {}
+        scale, direction = coords.get("scale", "percent"), coords.get("direction", "attacking")
+        if scale not in SCALE_OPTIONS[1:] or direction not in DIRECTION_OPTIONS[1:]:
+            raise ValueError
     except sources.DataError as e:
         return JSONResponse({"error": str(e)}, status_code=422)
     except (ValueError, AttributeError, TypeError):
-        return JSONResponse({"error": "send {teams: {home: {name, players: [{name, role}]}, away: ...}}"}, status_code=400)
+        return JSONResponse({"error": "send {teams: {home: {name, players: [{name, role}]}, away: ...}, coordinates: "
+                                      "{scale: percent|unit|metres|statsbomb, direction: attacking|fixed_home_right|fixed_home_left}}"}, status_code=400)
     for sid in [k for k, f in feeds.items() if time.time() - f.touched > FEED_IDLE]:
         feeds.pop(sid)
     if len(feeds) >= MAX_FEEDS:
         return JSONResponse({"error": "too many open feeds; try again later"}, status_code=429)
     sid = lineups["id"]
     ch = Channel(lineups)
-    ch.token = secrets.token_urlsafe(24)
+    ch.token, ch.cleaner = secrets.token_urlsafe(24), pipeline.LiveCleaner(lineups, scale, direction)
     ch.start(user_meta(lineups, f"feed:{sid}"), f"feed:{sid}")
     feeds[sid] = ch
     return JSONResponse({"id": sid, "seed": f"feed:{sid}", "token": ch.token, "push": f"/feeds/{sid}/events",
-                         "watch": f"/live?feed={sid}", "teams": ch.meta["teams"]})
+                         "watch": f"/live?feed={sid}", "report": f"/feeds/{sid}/report", "package": f"/feeds/{sid}/package",
+                         "teams": ch.meta["teams"]})
 
 
 async def feed_push(request):
-    """POST /feeds/{id}/events (Authorization: Bearer <token>): up to 500 events, in time order, as they happen."""
+    """POST /feeds/{id}/events (Authorization: Bearer <token>): up to 500 events as they happen. Each is cleaned;
+    bad or late events are quarantined (see /report), never fail the batch; a pass missing its receiver waits for the next event."""
     ch = feeds.get(request.path_params["id"])
     if ch is None:
         return JSONResponse({"error": "unknown feed"}, status_code=404)
@@ -407,22 +470,42 @@ async def feed_push(request):
             raise ValueError
     except (ValueError, AttributeError):
         return JSONResponse({"error": "send a list of 1-500 events"}, status_code=400)
-    warnings, events = [], []
-    try:
-        for i, r in enumerate(raw):
-            try:
-                events.append(sources.event(r, ch.lineups, warnings))
-            except sources.DataError as err:
-                raise sources.DataError(f"event {i + 1}: {err}") from None
-    except sources.DataError as e:
-        return JSONResponse({"error": str(e)}, status_code=422)
     async with ch.lock:
-        last = ch.raw[-1]["t"] if ch.raw else 0
-        if any(b["t"] < a["t"] for a, b in zip([{"t": last}] + events, events)):
-            return JSONResponse({"error": f"events must arrive in time order (last t was {last})"}, status_code=422)
+        before = len(ch.cleaner.log.quarantine)
+        events = ch.cleaner.push(raw)
         for e in events:
             await ch.ingest(e)
-    return JSONResponse({"accepted": len(events), "warnings": warnings, "minute": round(ch.raw[-1]["t"] / 60, 2)})
+    rep = ch.cleaner.report()
+    return JSONResponse({"received": len(raw), "accepted": len(events), "held_for_next_event": rep["held_for_next_event"],
+                         "quarantined": rep["quarantined"] - before, "quarantine": ch.cleaner.log.quarantine[before:][:20],
+                         "minute": round(ch.raw[-1]["t"] / 60, 2) if ch.raw else 0})
+
+
+def _feed_report(ch):
+    c = ch.cleaner
+    names = {s: ch.lineups[s]["name"] for s in ("home", "away")}
+    rep = pipeline.quality(c.received, range(c.received), ch.raw, c.log, "declared", c.scale, names, "live feed", "utf-8", time.time())
+    rep["live"] = c.report()
+    return rep
+
+
+async def feed_report(request):
+    ch = feeds.get(request.path_params["id"])
+    return JSONResponse(_feed_report(ch)) if ch else JSONResponse({"error": "unknown feed"}, status_code=404)
+
+
+async def feed_package(request):
+    """GET /feeds/{id}/package: the feed's clean events, quarantine, report and analysis so far (or at full time)."""
+    ch = feeds.get(request.path_params["id"])
+    if ch is None or not ch.raw:
+        return JSONResponse({"error": "unknown feed, or no events yet"}, status_code=404)
+    async with ch.lock:
+        events, quarantine, report = list(ch.raw), list(ch.cleaner.log.quarantine), _feed_report(ch)
+
+    def build():
+        info = {"sha256": None, "characters": None, "note": "live feed: events arrived in batches"}
+        return pipeline.package(ch.lineups, events, quarantine, report, info, _analysis_files(ch.lineups, events))
+    return _download(await asyncio.to_thread(build), f"faultlines-feed-{request.path_params['id']}.zip")
 
 
 async def health(_):
@@ -447,7 +530,9 @@ app = Starlette(
     routes=[Route("/live", live), Route("/health", health), Route("/explain", explain_route), Route("/ask", ask_route, methods=["POST"]),
             Route("/plan", plan_route, methods=["GET", "POST"]), Route("/assess", assess_route, methods=["POST"]),
             Route("/matches", upload_route, methods=["POST"]), Route("/matches/{id}", match_route),
+            Route("/matches/{id}/report", match_report), Route("/matches/{id}/package", match_package),
             Route("/feeds", feed_create, methods=["POST"]), Route("/feeds/{id}/events", feed_push, methods=["POST"]),
+            Route("/feeds/{id}/report", feed_report), Route("/feeds/{id}/package", feed_package),
             Mount("/", StaticFiles(directory=Path(__file__).parent / "web", html=True))],
     middleware=[Middleware(CORSMiddleware, allow_origins=os.getenv("ALLOW_ORIGIN", "*").split(","), allow_methods=["GET", "POST"], allow_headers=["content-type", "authorization"])],
     lifespan=lifespan)

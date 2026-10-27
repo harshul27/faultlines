@@ -40,6 +40,9 @@ BARS = {
     "xpa_rho": 0.3,                   # a team's xPA margin in a match tracks the points it won
     "reader_ai": 0.9, "reader_rules": 0.7,  # share of plan-reader checks passed
     "agent_tools": 0.9, "agent_fallback_max": 0.1, "agent_consistency": 0.8, "agent_judge": 4.0,
+    # Data pipeline on realistic noise (noise.py), level 1. Fixed after a one-match smoke test, before the 20-match run.
+    "pipe_events": 0.99, "pipe_faultline": 0.9, "pipe_frag_mae": 0.03, "pipe_planfit_rho": 0.85,
+    "pipe_quarantine_recall": 0.95, "pipe_false_quarantine": 0.01, "pipe_score_usable": 75,
 }
 RNG = np.random.default_rng(0)
 
@@ -342,6 +345,82 @@ def calibrate(seeds):
     return out
 
 
+# ---------- data pipeline: robustness to realistic noise ----------
+def test_pipeline(seeds):
+    """Each clean synthetic match is turned into a realistic messy provider file (noise.py: fixed frame and 120x80
+    scale, per-half clocks, club names as labels, renamed columns, decimal commas, duplicates, disorder, missing
+    receivers / outcomes / end points / xG, name variants, missing roles, out-of-scope and broken rows, markup), cleaned,
+    and analysed. The clean match is the truth."""
+    import noise
+    import sources
+    from match import DEMO_TEAMS, using
+    from network import score_at
+    teams = {s: {"name": DEMO_TEAMS[s]["name"], "roles": squad(s)} for s in ("home", "away")}
+    out = {}
+    for level in (1.0, 2.0):
+        m = defaultdict(list)
+        for s in seeds:
+            ev = list(simulate(s))
+            clean = sources.parse(sources.to_csv(ev, teams))  # same pipeline, clean input: the comparison baseline
+            text, truth = noise.noisy_csv(ev, teams, seed=s, level=level)
+            try:
+                lu, ne, q, rep = sources.parse(text)
+            except sources.DataError:
+                m["gate_failed"].append(1)
+                continue
+            m["gate_failed"].append(0)
+            m["events"].append(len(ne) / len(ev))
+            m["score_same"].append(score_at(ne, 1e9) == score_at(ev, 1e9))
+            m["quality"].append(rep["score"])
+            qrows = {x["source_row"] for x in q}
+            m["recall"].append(len(truth["broken_rows"] & qrows) / max(1, len(truth["broken_rows"])))
+            m["false_q"].append(len(qrows - truth["broken_rows"]) / (truth["rows"] - truth["out_of_scope"]))
+            with using(clean[0]):
+                base = {(t, mm): team_view(ev, t, mm) for t in ("home", "away") for mm in range(20, 91, 10)}
+                fit_c = {r["player"]: r["plan_fit"] for t in ("home", "away") for r in gp.assess(ev, t, 90, gp.default_plan(t))}
+            with using(lu):
+                noisy = {(t, mm): team_view(ne, t, mm) for t in ("home", "away") for mm in range(20, 91, 10)}
+                fit_n = {r["player"]: r["plan_fit"] for t in ("home", "away") for r in gp.assess(ne, t, 90, gp.default_plan(t))}
+            m["faultline"] += [base[k]["spof"]["name"] == noisy[k]["spof"]["name"] for k in base]
+            for k in [(t, 60) for t in ("home", "away")]:
+                fb = {p["name"]: p["fragility"] for p in base[k]["players"]}
+                m["frag_err"] += [abs(p["fragility"] - fb.get(p["name"], 0)) for p in noisy[k]["players"]]
+            common = [p for p in fit_c if p in fit_n]
+            m["planfit_rho"].append(spearmanr([fit_c[p] for p in common], [fit_n[p] for p in common])[0])
+        out[level] = {"matches": len(seeds), "gate_failed": int(sum(m["gate_failed"])),
+                      "events_recovered": round(float(np.mean(m["events"])), 4), "score_same": round(float(np.mean(m["score_same"])), 3),
+                      "faultline_agreement": round(float(np.mean(m["faultline"])), 3), "fragility_mae": round(float(np.mean(m["frag_err"])), 4),
+                      "planfit_rho_median": round(float(np.median(m["planfit_rho"])), 3), "quarantine_recall": round(float(np.mean(m["recall"])), 3),
+                      "false_quarantine": round(float(np.mean(m["false_q"])), 4), "quality_min": int(min(m["quality"])),
+                      "quality_max": int(max(m["quality"])), "quality_mean": round(float(np.mean(m["quality"])), 1)}
+    a, b = out[1.0], out[2.0]
+    scope = ("Shows the pipeline undoes the kinds of mess real provider files have, and the analysis survives it. These results are "
+             "optimistic: in this generator the receiver always makes the next touch, so receivers inferred from the next event are "
+             "exact; in real matches deflections and 50-50s break that, so expect lower agreement. Real files can also be messy in ways "
+             "this generator does not imitate (missing minutes, wrong player IDs): the quality report and its caveats are the guard there. "
+             "Some broken rows (e.g. a missing location) are legitimately repaired from the previous pass rather than quarantined, "
+             "which counts against the catch rate here.")
+    heavy = f" At double noise: events {b['events_recovered']:.1%}, fault line {b['faultline_agreement']:.0%}, quality {b['quality_min']}-{b['quality_max']}."
+    return [
+        result("Data pipeline: real events recovered, same result", a["events_recovered"] >= BARS["pipe_events"] and a["score_same"] == 1 and not a["gate_failed"],
+               f">= {BARS['pipe_events']:.0%} of events, identical final score, no gate failure",
+               f"{a['events_recovered']:.2%} of events, score identical in {a['score_same']:.0%} of {a['matches']} matches" + heavy,
+               "Noise level 1 on each of the matches; the clean match is the truth.", scope),
+        result("Data pipeline: analysis survives the noise", a["faultline_agreement"] >= BARS["pipe_faultline"] and a["fragility_mae"] <= BARS["pipe_frag_mae"]
+               and a["planfit_rho_median"] >= BARS["pipe_planfit_rho"],
+               f"fault line agrees >= {BARS['pipe_faultline']:.0%}, fragility error <= {BARS['pipe_frag_mae']}, plan fit rho >= {BARS['pipe_planfit_rho']}",
+               f"fault line {a['faultline_agreement']:.0%}, fragility error {a['fragility_mae']}, plan fit rho {a['planfit_rho_median']}",
+               "Fault lines every 10 minutes for both teams; fragility of every player at 60'; plan-fit ranking at 90'.", scope),
+        result("Data pipeline: quarantine is precise", a["quarantine_recall"] >= BARS["pipe_quarantine_recall"] and a["false_quarantine"] <= BARS["pipe_false_quarantine"],
+               f"catches >= {BARS['pipe_quarantine_recall']:.0%} of broken rows, sets aside <= {BARS['pipe_false_quarantine']:.0%} of valid rows",
+               f"caught {a['quarantine_recall']:.0%}, wrongly set aside {a['false_quarantine']:.2%}",
+               "Broken rows: unreadable time, missing location, unknown team, coordinates far off the pitch.", scope),
+        result("Data pipeline: the quality score sees the noise", a["quality_max"] < 100 and a["quality_min"] >= BARS["pipe_score_usable"],
+               f"noisy files score below 100 (clean = 100) and >= {BARS['pipe_score_usable']} (usable)",
+               f"{a['quality_min']}-{a['quality_max']} (mean {a['quality_mean']})", "The score is how far to trust the cleaned data.", scope),
+    ], out
+
+
 # ---------- plan reader ----------
 READER_CASES = [  # (text, [(check, target, value)]); target = player, or "team" = anywhere in the plan
     ("Do not press high; sit deep and stay compact.", [("lacks", "team", "high_recoveries")]),
@@ -552,7 +631,9 @@ HISTORY = """## What changed between runs (no pass bar was changed)
     left-back facing Reyes: the matchups were in the prompt, yet the model still chose. Fix (same pattern as
     substitutions): when a question names an opponent, the orchestrator looks up who faces them and assesses that
     player before the analyst writes (`agents._gather_matchups`).
-* **Run 8** (this report): agents and AI plan reader rerun after that fix (`--only-ai`); offline results carried over from run 4.
+* **Run 8** ([evaluation-run8.md](evaluation-run8.md), `--only-ai`): 12 of 20; the flank question names the left-back 3 of 3.
+* **Run 9** ([evaluation-run9.md](evaluation-run9.md)): adds the data-pipeline robustness tests (`--only-pipeline`): 20 matches turned into messy
+  provider files by `noise.py` and cleaned by `pipeline.py`. Bars fixed after a one-match smoke test, before this run.
 """
 
 REAL_DATA = """## Still needs real data (protocols, fixed in advance)
@@ -599,6 +680,7 @@ def main():
     ap.add_argument("--quick", action="store_true", help="fewer matches (smoke test)")
     ap.add_argument("--calibrate", action="store_true", help="print alert thresholds from seeds 7000+ and stop")
     ap.add_argument("--only-ai", action="store_true", help="rerun the AI tests; keep the offline results of the last run")
+    ap.add_argument("--only-pipeline", action="store_true", help="rerun the data-pipeline tests; keep everything else")
     args = ap.parse_args()
     if args.calibrate:
         calibrate(range(7000, 7040))
@@ -606,6 +688,14 @@ def main():
     n = 12 if args.quick else 60
     t0 = time.time()
     stage = lambda name: print(f"[{time.time() - t0:5.0f}s] {name}", flush=True)
+    if args.only_pipeline:
+        prev = json.loads((ROOT / "reports/evaluation.json").read_text(encoding="utf-8"))
+        tests = [t for t in prev["tests"] if not t["test"].startswith("Data pipeline")]
+        stage("data pipeline")
+        t, prev["raw"]["pipeline"] = test_pipeline(range(8000, 8000 + (6 if args.quick else 20)))
+        write(tests + t, prev["raw"], True)
+        stage(f"done: {sum(x['passed'] for x in tests + t)}/{len(tests + t)} passed -> reports/evaluation.md")
+        return
     if args.only_ai:
         prev = json.loads((ROOT / "reports/evaluation.json").read_text(encoding="utf-8"))
         tests = [t for t in prev["tests"] if not t["test"].startswith(("Agents", "Plan reader (gpt"))]
@@ -644,6 +734,9 @@ def offline(n, stage):
     tests += t
     stage("expected points added")
     t, raw["xpa"] = test_xpa(range(6000, 6000 + 4 * n))
+    tests += t
+    stage("data pipeline")
+    t, raw["pipeline"] = test_pipeline(range(8000, 8000 + max(6, n // 3)))
     tests += t
     stage("plan reader")
     rate, fails = score_reader(lambda text: gp.normalise(gp.parse_rules(text, "home"), "home"))

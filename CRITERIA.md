@@ -16,7 +16,7 @@ Every requirement from the challenge brief and the official rules, where it is m
 | (e) Personalize: analyst vs casual, favourite club/player, language | Follow either club, favourite player lens (passes, network share, expected points added), Casual/Analyst, 7 languages, the coach's own game plan, and the user's own data (upload or live feed) | `check.py`: every mode × favourite × language renders; analyst ≠ casual; adapters round-trip; `check_web.py`: upload and live feed end to end |
 | Player identification / focus mode | Favourite-player highlight and lens | manual demo |
 | Narrative generation, explainability ("control vs chaos", pressure changes) | Network-narrowing cues, fault-line shifts, passing-spread timeline | `check.py` cue tests |
-| Data innovation: create/extend synthetic datasets | Calibrated generator with team-strength prior, team shape, zone risk, pressure | `validate.py` |
+| Data innovation: create/extend synthetic datasets | Calibrated generator with team-strength prior, team shape, zone risk, pressure; a cleaning pipeline for outside data (standardise, validate, quarantine, clean, impute with provenance, quality gate, data package) and a realistic noise generator to prove it | `validate.py`; `check.py` and `evaluate.py --only-pipeline`: 20 noisy matches fully recovered |
 | Multi-language storytelling | Language picker (7 languages) → `/explain` → Microsoft Foundry `gpt-4.1-mini`, numeric fact-check on every answer, template fallback | `check.py` fact-check tests; live demo |
 
 ## Judging rubric (20% each)

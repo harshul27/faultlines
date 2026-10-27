@@ -2,7 +2,7 @@ name: image
 on:
   push:
     branches: [main]
-    paths: ["*.py", "calib/**", "web/**", "targets.json", "requirements-server.txt", "Dockerfile"]
+    paths: ["src/**", "web/**", "requirements-server.txt", "Dockerfile"]
   workflow_dispatch:
 permissions:
   contents: read

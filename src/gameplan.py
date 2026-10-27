@@ -174,7 +174,7 @@ def role_share():
     return {r: v / sum(a.values()) for r, v in a.items()}
 
 
-# Alert thresholds, calibrated on ordinary matches with a neutral plan (python evaluate.py --calibrate; seeds 7000+,
+# Alert thresholds, calibrated on ordinary matches with a neutral plan (python tests/evaluate.py --calibrate; seeds 7000+,
 # never used by the tests): each fires for about 3% of player-checks when nothing unusual is happening.
 OVERLOAD, BYPASS, FADE = 1.41, 0.56, 22
 

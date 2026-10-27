@@ -1,6 +1,6 @@
 """Live ingest: process events one at a time as they arrive and emit timed, machine-readable overlay cues.
 
-    python stream.py [seed] [speed]   # replay a synthetic match in wall-clock time (speed 60 = 1 match minute per second)
+    python src/stream.py [seed] [speed]   # replay a synthetic match in wall-clock time (speed 60 = 1 match minute per second)
 """
 import time
 
@@ -24,7 +24,7 @@ CUE_SCHEMA = {
         "latency_ms": {"type": "number", "minimum": 0},
     },
 }
-# ALERT and NARROWING are calibrated on ordinary matches (python evaluate.py --calibrate; seeds 7000+, never used by the
+# ALERT and NARROWING are calibrated on ordinary matches (python tests/evaluate.py --calibrate; seeds 7000+, never used by the
 # tests) so each cue type fires in about half of ordinary team-matches: a cue marks what is unusual for the league.
 ALERT, NARROWING = 0.40, -0.18  # fault-line share that triggers an alert; drop in passing spread (play narrowing)
 REARM, MARGIN, HOLD, MIN_GAP = round(ALERT - 0.05, 2), 0.05, 120, 300  # re-arm 5 pts lower; a new fault line must lead by 5 pts

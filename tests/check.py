@@ -1,6 +1,12 @@
-"""Self-check: one assertion per capability (live latency, cue schema, grounding, personalisation, game plan, own data). Run: python check.py
+"""Self-check: one assertion per capability (live latency, cue schema, grounding, personalisation, game plan, own data). Run: python tests/check.py
 Data realism vs held-out real data lives in validate.py.
 """
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))  # the app modules
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "calibration"))
+
 import json
 import jsonschema
 import numpy as np

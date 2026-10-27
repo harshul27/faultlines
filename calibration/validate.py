@@ -1,6 +1,11 @@
-"""Test: compare the calibrated generator and the strength model against HELD-OUT data. Run: python validate.py
+"""Test: compare the calibrated generator and the strength model against HELD-OUT data. Run: python calibration/validate.py
 Writes reports/validation.md and exits non-zero if any check fails (so it doubles as a smoke test).
 """
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))  # the app modules
+
 import json
 import sys
 from pathlib import Path
@@ -10,7 +15,7 @@ import numpy as np
 from calibrate import TARGETS, TEST, TRAIN, load, results_summary, scores, simulate_many, walk_forward
 from match import params
 
-ROOT = Path(__file__).parent
+ROOT = Path(__file__).resolve().parents[1]
 SEEDS = range(50_000, 50_380)  # one synthetic season; never used in fitting (fit/polish used 1000-1029, 2000-2149)
 
 
@@ -23,7 +28,7 @@ def main():
         rows.append((group, metric, syn, real, tol, bool(ok)))
 
     # 1. Strength model: out-of-sample forecasts of every held-out match (each season predicted from earlier seasons only)
-    alpha = json.loads((ROOT / "calib/params.json").read_text())["strength_model"]["alpha"]
+    alpha = json.loads((ROOT / "src/calibration.json").read_text())["strength_model"]["alpha"]
     probs, outcomes = walk_forward(TEST, alpha)
     train = [m for s in TRAIN for m in load(s)]
     base = np.array([np.mean([h > a for _, _, h, a in train]), np.mean([h == a for _, _, h, a in train]),

@@ -1,6 +1,6 @@
 """Live feed server: one shared match clock, pushed to every viewer over Server-Sent Events.
 
-    uvicorn server:app --port 8000          # then open http://127.0.0.1:8000
+    uvicorn server:app --app-dir src --port 8000 # then open http://127.0.0.1:8000
     LIVE_SPEED=10 (match seconds per wall second), ALLOW_ORIGIN=* (CORS for a separately hosted page)
     AZURE_OPENAI_ENDPOINT / AZURE_OPENAI_DEPLOYMENT enable AI explanations (managed identity, no keys)
 
@@ -542,6 +542,6 @@ app = Starlette(
             Route("/matches/{id}/report", match_report), Route("/matches/{id}/package", match_package),
             Route("/feeds", feed_create, methods=["POST"]), Route("/feeds/{id}/events", feed_push, methods=["POST"]),
             Route("/feeds/{id}/report", feed_report), Route("/feeds/{id}/package", feed_package),
-            Mount("/", StaticFiles(directory=Path(__file__).parent / "web", html=True))],
+            Mount("/", StaticFiles(directory=Path(__file__).parents[1] / "web", html=True))],
     middleware=[Middleware(CORSMiddleware, allow_origins=os.getenv("ALLOW_ORIGIN", "*").split(","), allow_methods=["GET", "POST"], allow_headers=["content-type", "authorization"])],
     lifespan=lifespan)

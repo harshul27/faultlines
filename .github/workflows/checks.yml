@@ -10,9 +10,9 @@ jobs:
           python-version: "3.13"
           cache: pip
       - run: pip install -r requirements.txt
-      - name: Requirement tests
-        run: python check.py
+      - name: Capability tests
+        run: python tests/check.py
       - name: Realism vs held-out real data
-        run: python validate.py
-      - name: Web data and live SSE server
-        run: python check_web.py
+        run: python calibration/validate.py
+      - name: Web data, live stream and API
+        run: python tests/check_web.py

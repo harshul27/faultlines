@@ -2,7 +2,7 @@
 
 Every event is in the acting team's attacking frame: x=0 own goal, x=100 opponent goal, y=0..100 (pitch 105 x 68 m).
 Clubs and players are fictional. Behaviour knobs are calibrated by calibrate.py against public-domain Premier League
-results (openfootball, CC0) and published league averages; fitted values live in calib/params.json.
+results (openfootball, CC0) and published league averages; fitted values live in src/calibration.json.
 A seeded storyline is baked in: Northbridge's holding midfielder is the hub, and from 60' Riverside man-mark them.
 """
 import contextvars
@@ -76,7 +76,7 @@ DEFAULTS = dict(
     press=0.25,        # opponent pressure intensity, rising up the pitch
     home_adv=0.0, att_sd=0.0, def_sd=0.0, att_def_corr=0.0,  # team strength prior (log goal-rate scale)
 )
-_PARAMS_FILE = Path(__file__).with_name("calib") / "params.json"
+_PARAMS_FILE = Path(__file__).with_name("calibration.json")  # written by calibration/calibrate.py
 
 
 def params():

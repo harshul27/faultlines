@@ -1,4 +1,9 @@
-"""Web checks: static replay data is consistent, and the live server speaks SSE correctly. Run: python check_web.py"""
+"""Web checks: static replay data is consistent, and the live server speaks SSE correctly. Run: python tests/check_web.py"""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))  # the app modules
+
 import json
 import os
 import socket
@@ -12,7 +17,7 @@ import jsonschema
 
 from stream import CUE_SCHEMA
 
-ROOT = Path(__file__).parent
+ROOT = Path(__file__).resolve().parents[1]
 
 # Static data the page reads: every match listed, a snapshot per minute, cues valid and in order
 index = json.loads((ROOT / "web/data/index.json").read_text())
@@ -34,7 +39,7 @@ with socket.socket() as sock:
     sock.bind(("127.0.0.1", 0))
     port = sock.getsockname()[1]
 env = {**os.environ, "LIVE_SPEED": "300"}
-proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "server:app", "--port", str(port)], cwd=ROOT, env=env,
+proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "server:app", "--app-dir", "src", "--port", str(port)], cwd=ROOT, env=env,
                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 base = f"http://127.0.0.1:{port}"
 

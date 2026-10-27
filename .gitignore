@@ -3,5 +3,4 @@ __pycache__/
 .venv/
 .env
 *.log
-.streamlit/secrets.toml
 .vercel

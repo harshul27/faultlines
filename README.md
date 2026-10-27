@@ -55,19 +55,19 @@ removed from the network (graph efficiency over share-weighted pass links). The 
 
 | Technology | Used for | Where |
 |---|---|---|
-| **Microsoft Foundry: gpt-4.1-mini** | The analyst agent, explanations, reading a coach's game plan (JSON mode), translation | `agents.py`, `explain.py`, `gameplan.py`, `grounding.py` |
-| **Microsoft Foundry: Phi-4-mini-instruct** | Fast router: classifies each question and stops off-topic ones before a large-model call | `agents.py` |
-| **Microsoft Foundry: text-embedding-3-small** | Conversation memory: keeps only earlier turns relevant to the new question | `agents.py` |
-| **Microsoft Agent Framework** | The tool-using analyst agent (10 match and game-plan tools), sessions, deterministic options | `agents.py` |
-| **Azure Container Apps** | Hosts the API and the live match stream (one shared match clock, SSE, HTTPS ingress) | `server.py`, `Dockerfile` |
-| **Managed identity / Microsoft Entra ID** | Keyless access to Foundry: no API keys anywhere | `ai.py` |
+| **Microsoft Foundry: gpt-4.1-mini** | The analyst agent, explanations, reading a coach's game plan (JSON mode), translation | `src/agents.py`, `src/explain.py`, `src/gameplan.py`, `src/grounding.py` |
+| **Microsoft Foundry: Phi-4-mini-instruct** | Fast router: classifies each question and stops off-topic ones before a large-model call | `src/agents.py` |
+| **Microsoft Foundry: text-embedding-3-small** | Conversation memory: keeps only earlier turns relevant to the new question | `src/agents.py` |
+| **Microsoft Agent Framework** | The tool-using analyst agent (10 match and game-plan tools), sessions, deterministic options | `src/agents.py` |
+| **Azure Container Apps** | Hosts the API and the live match stream (one shared match clock, SSE, HTTPS ingress) | `src/server.py`, `Dockerfile` |
+| **Managed identity / Microsoft Entra ID** | Keyless access to Foundry: no API keys anywhere | `src/ai.py` |
 | **Azure Container Registry** | Stores the container image | `.github/workflows/image.yml` |
 | **GitHub Actions** | Tests on every push, builds and pushes the image, publishes the page | `.github/workflows/` |
 | **GitHub Pages / Vercel** | Static hosting for the web page | `web/` |
-| Python: NetworkX, SciPy, NumPy | Pass networks, shortest paths, fragility, Monte Carlo win probability | `network.py`, `agents.py` |
-| Python: scikit-learn | Team-strength model used to calibrate the generator on real results | `calibrate.py` |
-| Python: Starlette, Uvicorn | Async API and Server-Sent Events | `server.py` |
-| JSON Schema | Validates every broadcast cue | `stream.py` |
+| Python: NetworkX, SciPy, NumPy | Pass networks, shortest paths, fragility, Monte Carlo win probability | `src/network.py`, `src/agents.py` |
+| Python: scikit-learn | Team-strength model used to calibrate the generator on real results | `calibration/calibrate.py` |
+| Python: Starlette, Uvicorn | Async API and Server-Sent Events | `src/server.py` |
+| JSON Schema | Validates every broadcast cue | `src/stream.py` |
 | Plain HTML, CSS, JavaScript | The page: SVG pitch and charts, no framework | `web/` |
 
 ## The analyst agents
@@ -86,7 +86,7 @@ Questions go to a small team of agents; the page shows the trace of every step.
 ## The game plan
 
 The coach writes the plan in their own words or pastes a sheet (`player, position, instruction, priority`).
-`gameplan.py` turns each instruction into weighted metrics and gives every player a relevance to the plan (1-5);
+`src/gameplan.py` turns each instruction into weighted metrics and gives every player a relevance to the plan (1-5);
 negations like "don't press" are respected. Each player is then rated on 14 metrics (involvement, completion,
 progression, final-third and box entries, key passes, xA, xG, shots, press resistance, recoveries, high recoveries,
 long passes, network share) against role norms, scaled to minutes played. Plan fit 50 = a typical player in that role.
@@ -94,7 +94,7 @@ Works without AI (keyword rules) and for any formation.
 
 ## Bring your own data
 
-Every upload and live-feed event goes through `pipeline.py`:
+Every upload and live-feed event goes through `src/pipeline.py`:
 
 | Stage | What happens |
 |---|---|
@@ -115,7 +115,7 @@ curl -X POST https://<server>/feeds/<id>/events -H "Authorization: Bearer <token
   -d '[{"t": 12.5, "team": "home", "type": "pass", "player": "A Player", "recipient": "C Player", "x": 40, "y": 50, "end_x": 55, "end_y": 60, "success": true}]'
 ```
 
-Field reference: the "Data format" section of the Your data tab, or the docstring in `sources.py`.
+Field reference: the "Data format" section of the Your data tab, or the docstring in `src/sources.py`.
 
 ## How far to trust it
 
@@ -138,12 +138,12 @@ Every judgement-based part is tested against pass bars fixed before the first ru
 
 ```bash
 pip install -r requirements.txt
-uvicorn server:app --port 8000          # page + live stream at http://127.0.0.1:8000
-python check.py                         # capability tests
-python check_web.py                     # live stream and API tests
-python validate.py                      # realism vs held-out real results
-python evaluate.py [--ai]               # evaluation report
-python stream.py 23 60                  # headless replay: prints overlay cues as JSON lines
+uvicorn server:app --app-dir src --port 8000   # page + live stream at http://127.0.0.1:8000
+python tests/check.py                          # capability tests
+python tests/check_web.py                      # live stream and API tests
+python tests/evaluate.py [--ai]                # evaluation report -> reports/evaluation.md
+python calibration/validate.py                 # realism vs held-out real results -> reports/validation.md
+python src/stream.py 23 60                     # headless replay: prints overlay cues as JSON lines
 ```
 
 AI features need `AZURE_OPENAI_ENDPOINT` (and optionally `AZURE_OPENAI_DEPLOYMENT`, `FOUNDRY_ROUTER_DEPLOYMENT`,
@@ -172,23 +172,27 @@ The server also serves the page itself, so step 4 is optional.
 
 ## Repository map
 
-| Path | Role |
-|---|---|
-| `server.py` | API, live match stream (SSE), uploads and live feeds |
-| `match.py` | Synthetic match generator and the per-request squad context |
-| `stream.py` | Live engine: processes events one at a time and emits timed cues |
-| `network.py` | Pass networks, fragility, expected points added |
-| `feed.py` | Snapshots and timelines shared by the server and the static export |
-| `explain.py`, `grounding.py` | Explanations from facts, fact-checking, translation |
-| `agents.py` | The analyst agents and their tools |
-| `gameplan.py` | Game-plan reading, player assessment, plan execution, zones |
-| `pipeline.py`, `sources.py` | Data cleaning pipeline and file readers |
-| `ai.py` | Keyless Microsoft Foundry clients |
-| `calibrate.py`, `validate.py`, `targets.json`, `calib/`, `data/` | Generator calibration on real results and held-out validation |
-| `check.py`, `check_web.py`, `evaluate.py`, `noise.py` | Tests, evaluation, realistic noise for robustness tests |
-| `export.py` | Rebuilds the static replay data and samples in `web/data/` |
-| `web/` | The page |
-| `reports/` | Validation and evaluation reports |
+```
+src/            the application: API and live stream, analysis, agents, data pipeline
+  server.py       API, live match stream (SSE), uploads and live feeds
+  match.py        synthetic match generator (calibrated by calibration/, parameters in calibration.json)
+  stream.py       live engine: one event at a time, timed broadcast cues
+  network.py      pass networks, fragility, expected points added
+  feed.py         snapshots and timelines for the page
+  explain.py      explanations from computed facts
+  grounding.py    fact-checking and number-safe translation
+  agents.py       the analyst agents and their tools
+  gameplan.py     game-plan reading, player assessment, plan execution, zones
+  pipeline.py     data cleaning pipeline (validate, quarantine, clean, impute, quality, package)
+  sources.py      readers for CSV, JSON and StatsBomb files
+  ai.py           keyless Microsoft Foundry clients
+  noise.py        realistic provider noise, for samples and robustness tests
+  export.py       rebuilds the page's replay data and samples in web/data/
+web/            the page (HTML, CSS, JavaScript) and its replay data
+tests/          capability tests, live stream and API tests, the evaluation
+calibration/    fits the generator on real results (public domain) and validates it on later seasons
+reports/        evaluation and validation reports (earlier runs in reports/history/)
+```
 
 ## Roadmap
 

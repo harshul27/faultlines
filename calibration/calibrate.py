@@ -1,4 +1,4 @@
-"""Train: fit the team-strength model and the generator's knobs on TRAINING data only. Run: python calibrate.py
+"""Train: fit the team-strength model and the generator's knobs on TRAINING data only. Run: python calibration/calibrate.py
 
 Data (permissive only):
   * openfootball/football.json, CC0 public domain: Premier League results 2010/11 - present (data/openfootball/).
@@ -7,6 +7,11 @@ Split by time, so nothing from the future leaks into training:
   train = 2010/11 - 2022/23 (13 seasons), test = 2023/24 - present (held out, used only by validate.py).
 For published pass stats the same idea applies: fit to 2023/24, test on 2024/25 and 2025/26.
 """
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))  # the app modules
+
 import json
 import math
 from pathlib import Path
@@ -18,7 +23,8 @@ from sklearn.linear_model import PoissonRegressor
 
 from match import DEFAULTS, simulate
 
-ROOT = Path(__file__).parent
+ROOT = Path(__file__).resolve().parent
+PARAMS = ROOT.parent / "src" / "calibration.json"  # read by the generator at run time
 SEASONS = [f"{y}-{str(y + 1)[2:]}" for y in range(2010, 2027)]
 TRAIN = SEASONS[:13]   # 2010-11 .. 2022-23
 TEST = SEASONS[13:]    # 2023-24 .. 2026-27 (in progress)
@@ -190,10 +196,10 @@ def recent_goals():
 
 
 if __name__ == "__main__" and "--polish" in __import__("sys").argv:
-    saved = json.loads((ROOT / "calib/params.json").read_text())
+    saved = json.loads(PARAMS.read_text())
     saved["generator"] = polish(saved["generator"], recent_goals())
     saved["goals_target"] = recent_goals()
-    (ROOT / "calib/params.json").write_text(json.dumps(saved, indent=1))
+    PARAMS.write_text(json.dumps(saved, indent=1))
     print("polished:", saved["generator"])
 elif __name__ == "__main__":
     train_matches = [m for s in TRAIN for m in load(s)]
@@ -207,9 +213,8 @@ elif __name__ == "__main__":
     gen, final_loss = fit_generator(strength, recent_goals())
     gen = polish(gen, recent_goals())
     print("generator:", gen, "loss", round(final_loss, 3))
-    (ROOT / "calib").mkdir(exist_ok=True)
-    (ROOT / "calib/params.json").write_text(json.dumps(dict(
+    PARAMS.write_text(json.dumps(dict(
         generator=gen, strength_model=strength, fit_loss=final_loss, real_train=real_train, goals_target=recent_goals(),
         split=dict(train=TRAIN, test=TEST, train_matches=len(train_matches), test_matches=len(test_matches)),
         sources=["openfootball/football.json (CC0)", "targets.json (premierleague.com published averages)"]), indent=1))
-    print("wrote calib/params.json")
+    print(f"wrote {PARAMS}")

@@ -1,4 +1,4 @@
-"""Write the static replay/analysis data the web page reads: python export.py -> web/data/*.json"""
+"""Write the static replay/analysis data the web page reads: python src/export.py -> web/data/*.json"""
 import json
 from pathlib import Path
 
@@ -6,7 +6,7 @@ import sources
 from feed import DEMO_SEEDS, timeline
 from match import DEMO_TEAMS, simulate, squad
 
-OUT = Path(__file__).parent / "web" / "data"
+OUT = Path(__file__).parents[1] / "web" / "data"
 
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)

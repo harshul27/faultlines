@@ -6,3 +6,4 @@ tests
 reports
 *.log
 .env
+pitch

@@ -50,12 +50,19 @@ def match_meta(seed):
                                   for t in TEAMS})
 
 
-def timeline(seed, window=15):
-    """Whole match for replay + analysis: events, cues, and a snapshot every match minute."""
-    events = list(simulate(seed))
+def user_meta(lineups, seed):
+    """Meta for a user's match (no team strengths: those exist only for the synthetic clubs)."""
+    return dict(seed=seed, source="user", teams={s: dict(name=lineups[s]["name"], players=lineups[s]["players"])
+                                                 for s in ("home", "away")})
+
+
+def timeline(seed, window=15, events=None, meta=None):
+    """Whole match for replay + analysis: events, cues, and a snapshot every match minute.
+    A user's match passes its own events and meta (inside match.using(lineups))."""
+    events = events if events is not None else list(simulate(seed))
     eng = LiveEngine(window)
     for e in events:
         eng.ingest(e)
     end = int(events[-1]["t"] // 60) + 1
-    return dict(meta=match_meta(seed), window=window, events=[compact_event(e) for e in events], cues=eng.cues,
+    return dict(meta=meta or match_meta(seed), window=window, events=[compact_event(e) for e in events], cues=eng.cues,
                 snapshots=[snapshot(events, m, window) for m in range(1, end + 1)])

@@ -4,7 +4,7 @@ A live pass-network overlay that finds each team's **single point of failure**, 
 cut the team's passing connectivity the most, and explains it in plain language for each fan.
 
 Built for *Inside the Game: Developer Hackathon* (challenge: The Synthetic Match Insights Engine).
-All match data is synthetic; clubs and players are fictional. See [CRITERIA.md](CRITERIA.md) for how every
+All demo data is synthetic; clubs and players are fictional. Users can also bring their own match (upload or live feed); nothing they send is stored on disk. See [CRITERIA.md](CRITERIA.md) for how every
 challenge requirement is met and tested.
 
 ## Pipeline
@@ -14,7 +14,7 @@ challenge requirement is met and tested.
 | Interpret | Rolling pass network per team; **fragility** = share of the other players' passing connectivity lost if a player is removed; progression and ball security per window | `network.py` |
 | Explain | Microsoft Foundry model writes the story from computed facts only; a fact-check rejects any number not in the facts | `explain.py` |
 | Render | Pitch overlay, live cue feed, timed broadcast cues validated against a JSON Schema | `app.py`, `stream.py` |
-| Personalize | Follow a club, a favourite player (with expected points added), Casual/Analyst mode, 7 languages | `app.py` |
+| Personalize | Follow a club, a favourite player (with expected points added), Casual/Analyst mode, 7 languages, your own game plan, your own data | `web/`, `gameplan.py`, `sources.py` |
 
 ## Web page (live + deep analysis)
 **https://harshul27.github.io/faultlines/**: a static page with two tabs:
@@ -86,6 +86,31 @@ cleaned, that sheet priorities parse, and that the demo hub shows as overloaded 
 `/assess` needs no AI. Limits: there is no bench data (candidates are who to take off), no tracking data (no
 off-ball runs or distance covered), and the norms come from the synthetic league.
 
+
+## Use your own data
+The demo runs on synthetic matches. On the **Your data** tab, anyone can analyse their own match with everything on the
+page (live view, fault lines, game plan, the analyst agents):
+
+* **Upload a match**: Fault Lines CSV or JSON (download the samples from the tab), or a StatsBomb events JSON file
+  (converted automatically; first team in the file = home). `POST /matches {text, format, home, away}`.
+* **Connect a live source**: open a feed with your line-ups, then push events from your system as they happen.
+  Everyone watching the feed gets the same live analysis over SSE. "Simulate my source" streams the sample match into
+  your feed to show it working.
+
+```bash
+curl -X POST https://<server>/feeds -H "Content-Type: application/json" -d '{"teams": {"home": {"name": "Your club", "players": [{"name": "A Player", "role": "CDM"}]}, "away": {"name": "Opponent", "players": [{"name": "B Player", "role": "ST"}]}}}'
+curl -X POST https://<server>/feeds/<id>/events -H "Authorization: Bearer <token>" -H "Content-Type: application/json" -d '[{"t": 12.5, "team": "home", "type": "pass", "player": "A Player", "recipient": "A Player 2", "x": 40, "y": 50, "end_x": 55, "end_y": 60, "success": true}]'
+```
+
+Field reference: the "Data format" section on the tab, or the docstring of [sources.py](sources.py). Coordinates are
+0-100 in the acting team's attacking direction; roles are GK, RB, RCB, LCB, LB, CDM, RCM, LCM, RW, ST, LW.
+
+Privacy and safety: uploads live in the server's memory only (newest 20) and feeds close after 3 idle hours; nothing
+is written to disk. Every name, role, coordinate and size is validated on the server (`sources.py`), names with
+markup are rejected and the page escapes them too; pushing to a feed needs its secret token; events must arrive in
+time order. Uploaded matches get a generic starter game plan, which users replace with their own.
+Under the hood, `match.using(lineups)` swaps in the user's squads for that request only, so every analysis, the agents
+included, runs unchanged on real data and never touches the demo.
 
 ## How far to trust each part: evaluation
 `python evaluate.py [--ai]` tests the judgement-based parts against pass bars fixed in code before the first run, on

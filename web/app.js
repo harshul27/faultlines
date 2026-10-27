@@ -22,6 +22,7 @@ const px = (x, y) => [x * 1.05, y * 0.68];
 const clock = (t) => `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
 const surname = (n) => (n || "").split(" ").slice(-1)[0];
 const pct = (v) => `${Math.round(v * 100)}%`;
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);  // names can come from users' data
 const xpa = (v) => `${v >= 0 ? "+" : ""}${(v ?? 0).toFixed(2)}`;
 const teamColor = (t) => getComputedStyle(document.documentElement).getPropertyValue(t === "home" ? "--home" : "--away").trim();
 const other = (t) => (t === "home" ? "away" : "home");
@@ -128,10 +129,11 @@ function renderLive() {
   const m = t / 60;
   lineChart($("spark-conn"), ["home", "away"].map((tm) => ({ color: teamColor(tm), pts: minuteSeries((s) => s.teams[tm].efficiency) })), { yMax: 45, marker: m, xMax: 95 });
   lineChart($("spark-prog"), ["home", "away"].map((tm) => ({ color: teamColor(tm), pts: minuteSeries((s) => s.teams[tm].progressive) })), { yMax: 50, marker: m, xMax: 95 });
-  $("cues").innerHTML = S.cues.slice(-10).reverse().map((c) => `<li><time>${c.match_clock}</time><span><span class="kind">${c.cue.replaceAll("_", " ")}</span> ${c.headline}</span></li>`).join("");
+  $("cues").innerHTML = S.cues.slice(-10).reverse().map((c) => `<li><time>${c.match_clock}</time><span><span class="kind">${c.cue.replaceAll("_", " ")}</span> ${esc(c.headline)}</span></li>`).join("");
   $("ticker").innerHTML = S.events.slice(-14).reverse().map((e) => {
     const cls = e.goal ? "goal" : e.ok || e.type === "shot" ? "" : "lost";
-    const what = e.type === "shot" ? `${e.goal ? "GOAL" : "Shot"} ${surname(e.player)} (xG ${e.xg})` : `${surname(e.player)} → ${surname(e.to)} ${e.ok ? "✓" : "✗ lost"}`;
+    const what = e.type === "own_goal" ? "OWN GOAL" : e.type === "shot" ? `${e.goal ? "GOAL" : "Shot"} ${esc(surname(e.player))} (xG ${e.xg})`
+      : `${esc(surname(e.player))} → ${esc(surname(e.to))} ${e.ok ? "✓" : "✗ lost"}`;
     return `<li class="${cls}"><time>${clock(e.t)}</time><span style="color:${cls ? "" : teamColor(e.team)}">${what}</span></li>`;
   }).join("");
   $("latency").textContent = S.live
@@ -199,7 +201,7 @@ function renderAnalysis() {
   const partners = (S.snap?.teams[team].edges ?? []).filter((e) => e[0] === sel || e[1] === sel)
     .map(([a, b, w]) => [a === sel ? b : a, w]).sort((a, b) => b[1] - a[1]).slice(0, 6);
   const top = partners[0]?.[1] || 1;
-  $("pp-partners").innerHTML = partners.map(([n, w]) => `<div><span>${n}</span><i style="width:${(w / top) * 100}%"></i><b>${w}</b></div>`).join("") || `<span class="muted small">No passes in the window</span>`;
+  $("pp-partners").innerHTML = partners.map(([n, w]) => `<div><span>${esc(n)}</span><i style="width:${(w / top) * 100}%"></i><b>${w}</b></div>`).join("") || `<span class="muted small">No passes in the window</span>`;
 
   // Team comparison
   lineChart($("tc-conn"), ["home", "away"].map((tm) => ({ color: teamColor(tm), pts: minuteSeries((s) => s.teams[tm].efficiency) })), { yMax: 45, marker: currentT() / 60 });
@@ -211,12 +213,17 @@ function renderAnalysis() {
   $("ask-off").hidden = AI.on;
   const tname = S.meta?.teams[team].name;
   $("moments").innerHTML = S.cues.filter((c) => c.team === tname || c.cue === "goal").slice(-12).reverse()
-    .map((c) => `<li><time>${c.match_clock}</time><span><span class="kind">${c.cue.replaceAll("_", " ")}</span> ${c.headline}</span></li>`).join("");
+    .map((c) => `<li><time>${c.match_clock}</time><span><span class="kind">${c.cue.replaceAll("_", " ")}</span> ${esc(c.headline)}</span></li>`).join("");
 }
 
 // ---------- store updates ----------
 function reset(meta) {
   Object.assign(S, { meta, events: [], cues: [], minutes: [], snap: null, selected: "" });
+  const scope = planScope();  // a different set of clubs needs its own game plans
+  if (scope !== S.planScope) {
+    S.planScope = scope; PLAN.home = PLAN.away = null; ASSESS.data = null; ASSESS.key = "";
+    if (SERVER.on) { loadPlan("home"); loadPlan("away"); }
+  }
   $("follow-home").textContent = meta.teams.home.name;
   $("follow-away").textContent = meta.teams.away.name;
   $("sb-home").textContent = meta.teams.home.name;
@@ -225,7 +232,7 @@ function reset(meta) {
 }
 function fillFavourites() {
   const keep = S.fav;
-  $("favourite").innerHTML = `<option value="">(none)</option>` + (S.meta?.teams[S.follow].players ?? []).map((p) => `<option>${p}</option>`).join("");
+  $("favourite").innerHTML = `<option value="">(none)</option>` + (S.meta?.teams[S.follow].players ?? []).map((p) => `<option>${esc(p)}</option>`).join("");
   $("favourite").value = S.meta?.teams[S.follow].players.includes(keep) ? keep : "";
   S.fav = $("favourite").value;
 }
@@ -243,12 +250,12 @@ function currentT() {
 }
 
 // ---------- sources ----------
-function startLive() {
+function startLive(feed = null) {
   stopSource();
-  S.live = true;
+  S.live = true; S.feed = feed;
   $("replay-controls").hidden = true;
-  setBadge("live", "LIVE");
-  const es = new EventSource(`${LIVE}/live`);
+  setBadge("live", feed ? "YOUR FEED" : "LIVE");
+  const es = new EventSource(`${LIVE}/live${feed ? `?feed=${encodeURIComponent(feed)}` : ""}`);
   S.source = { stop: () => es.close() };
   es.addEventListener("hello", (m) => {
     const d = JSON.parse(m.data);
@@ -276,7 +283,7 @@ function startLive() {
     S.dirty = true;
   });
   es.onerror = () => setBadge("", "Reconnecting…");
-  es.onopen = () => setBadge("live", "LIVE");
+  es.onopen = () => setBadge("live", feed ? "YOUR FEED" : "LIVE");
 }
 
 async function startReplay(file) {
@@ -284,7 +291,9 @@ async function startReplay(file) {
   S.live = false;
   $("replay-controls").hidden = false;
   setBadge("replay", "REPLAY");
-  const data = await (await fetch(file)).json();
+  let data;
+  try { data = await (await fetch(file)).json(); } catch { setBadge("", "Match unavailable"); return; }
+  if (!data.events) { setBadge("", "Match unavailable"); return; }  // e.g. an upload the server no longer holds
   reset(data.meta);
   let i = 0, c = 0, alive = true;
   const end = data.events.at(-1).t;
@@ -327,7 +336,7 @@ function setBadge(cls, text) { $("badge").className = `badge ${cls}`; $("badge")
 
 // ---------- UI wiring ----------
 function setTab(name) {
-  for (const t of ["live", "analysis"]) {
+  for (const t of ["live", "analysis", "data"]) {
     $(`tab-${t}`).setAttribute("aria-selected", t === name);
     $(`panel-${t}`).hidden = t !== name;
   }
@@ -335,6 +344,7 @@ function setTab(name) {
 }
 $("tab-live").onclick = () => setTab("live");
 $("tab-analysis").onclick = () => setTab("analysis");
+$("tab-data").onclick = () => setTab("data");
 for (const t of ["home", "away"]) $(`follow-${t}`).onclick = () => {
   S.follow = t; S.selected = "";
   $("follow-home").setAttribute("aria-checked", t === "home"); $("follow-away").setAttribute("aria-checked", t === "away");
@@ -350,7 +360,15 @@ $("favourite").onchange = (e) => { S.fav = e.target.value; S.selected = S.fav; S
 $("show-opp").onchange = (e) => { S.showOpp = e.target.checked; S.dirty = true; };
 $("speed").onchange = (e) => { S.speed = +e.target.value; };
 $("play").onclick = () => { S.playing = !S.playing; $("play").textContent = S.playing ? "⏸" : "▶"; };
-$("source").onchange = (e) => (e.target.value === "live" ? startLive() : startReplay(e.target.value));
+$("source").onchange = (e) => openSource(e.target.value);
+function openSource(v) {
+  if (v === "live") startLive();
+  else if (v.startsWith("feed:")) startLive(v.slice(5));
+  else if (v.startsWith("upload:")) startReplay(`${LIVE}/matches/${encodeURIComponent(v.slice(7))}`);
+  else startReplay(v);
+}
+const seedParam = () => (S.live ? (S.feed ? `feed:${S.feed}` : "live") : S.meta.seed);  // which match the server analyses
+const planScope = () => (S.meta?.source === "user" ? String(S.meta.seed) : "demo");
 
 function frame(now) {
   const analysisOpen = !$("panel-analysis").hidden;
@@ -368,7 +386,7 @@ function frame(now) {
 
 // ---------- AI explanations (Microsoft Foundry via the live server; grounded, cached per match minute) ----------
 const AI = { on: false, ctx: "", text: "", source: "", minute: 0, busy: false, last: 0, asked: "" };
-const aiContext = () => [S.live ? "live" : S.meta?.seed, S.follow, S.mode, S.lang, S.fav].join("|");
+const aiContext = () => [S.meta ? seedParam() : "", S.follow, S.mode, S.lang, S.fav].join("|");
 async function refreshAI(now) {
   const minute = Math.floor(currentT() / 60);
   if (!AI.on || !S.meta || AI.busy || minute < 1 || now - AI.last < 1500) return;
@@ -376,7 +394,7 @@ async function refreshAI(now) {
   if (ask === AI.asked) return;
   AI.busy = true; AI.last = now; AI.asked = ask;
   try {
-    const q = new URLSearchParams({ seed: S.live ? "live" : S.meta.seed, minute, team: S.follow, mode: S.mode, lang: S.lang, fav: S.fav });
+    const q = new URLSearchParams({ seed: seedParam(), minute, team: S.follow, mode: S.mode, lang: S.lang, fav: S.fav });
     const r = await fetch(`${LIVE}/explain?${q}`, { signal: AbortSignal.timeout(20000) });
     if (r.ok && aiContext() === ctx) Object.assign(AI, { ctx, ...(({ text, source, minute }) => ({ text, source, minute }))(await r.json()) });
     S.dirty = true;
@@ -408,7 +426,7 @@ async function askAnalyst() {
   $("ask-go").disabled = true; $("ask-q").value = "";
   try {
     const r = await fetch(`${LIVE}/ask`, { method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(60000),
-      body: JSON.stringify({ question, minute, seed: S.live ? "live" : S.meta.seed, lang: S.lang, history: askHistory.slice(-6),
+      body: JSON.stringify({ question, minute, seed: seedParam(), lang: S.lang, history: askHistory.slice(-6),
         plan_team: S.follow, plan: PLAN[S.follow]?.custom ? PLAN[S.follow].plan : null }) });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
@@ -436,21 +454,23 @@ const saved = {
 };
 const label = (k) => k.replaceAll("_", " ");
 async function loadPlan(team, demo = false) {
-  const mine = !demo && saved.get(`fl-plan-${team}`);
+  const scope = planScope(), mine = !demo && saved.get(`fl-plan-${scope}-${team}`);
   if (mine?.plan) PLAN[team] = mine;
   else {
     try {
-      const d = await (await fetch(`${LIVE}/plan?team=${team}`, { signal: AbortSignal.timeout(8000) })).json();
+      const seed = scope === "demo" ? "live" : scope;
+      const d = await (await fetch(`${LIVE}/plan?team=${team}&seed=${encodeURIComponent(seed)}`, { signal: AbortSignal.timeout(8000) })).json();
+      if (planScope() !== scope) return;  // the match changed while loading
       PLAN[team] = { text: d.text, plan: d.plan, source: d.source, custom: false };
     } catch { return; }
-    if (demo) saved.set(`fl-plan-${team}`, null);
+    if (demo) saved.set(`fl-plan-${scope}-${team}`, null);
   }
   if (team === S.follow) { showPlan(); ASSESS.key = ""; }
 }
 function showPlan() {
   const p = PLAN[S.follow];
   $("plan-text").value = p?.text ?? "";
-  $("plan-src").textContent = p ? `${p.custom ? "Your plan" : "Demo plan"} · read by ${p.source}` : "";
+  $("plan-src").textContent = p ? `${p.custom ? "Your plan" : planScope() === "demo" ? "Demo plan" : "Starter plan: edit it to yours"} · read by ${p.source}` : "";
   const rows = [];
   for (const pr of p?.plan.principles ?? []) {
     const d = node("div"); d.append(node("b", "", "Team"), node("span", "", pr.text), ...Object.keys(pr.metrics).map((k) => node("span", "tag", label(k)))); rows.push(d);
@@ -466,11 +486,11 @@ async function applyPlan() {
   $("plan-apply").disabled = true; $("plan-src").textContent = "Reading your plan…";
   try {
     const r = await fetch(`${LIVE}/plan`, { method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(70000),
-      body: JSON.stringify({ text, team }) });
+      body: JSON.stringify({ text, team, seed: planScope() === "demo" ? "live" : planScope() }) });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
     PLAN[team] = { text, plan: d.plan, source: d.source, custom: true };
-    saved.set(`fl-plan-${team}`, PLAN[team]);
+    saved.set(`fl-plan-${planScope()}-${team}`, PLAN[team]);
     if (team === S.follow) { showPlan(); ASSESS.key = ""; ASSESS.last = 0; }
   } catch (err) { $("plan-src").textContent = `Couldn't read the plan: ${err.message}`; } finally { $("plan-apply").disabled = false; }
 }
@@ -481,12 +501,12 @@ $("plan-file").onchange = async (e) => { const f = e.target.files[0]; if (f) $("
 async function refreshAssess(now) {
   const p = PLAN[S.follow], minute = Math.floor(currentT() / 60);
   if (!SERVER.on || $("panel-analysis").hidden || !S.meta || !p || ASSESS.busy || minute < 5 || now - ASSESS.last < 3000) return;
-  const key = [S.live ? "live" : S.meta.seed, S.follow, minute, p.custom, p.text].join("|");
+  const key = [seedParam(), S.follow, minute, p.custom, p.text].join("|");
   if (key === ASSESS.key) return;
   ASSESS.busy = true; ASSESS.last = now;
   try {
     const r = await fetch(`${LIVE}/assess`, { method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(15000),
-      body: JSON.stringify({ seed: S.live ? "live" : S.meta.seed, minute, plan_team: S.follow, plan: p.custom ? p.plan : null }) });
+      body: JSON.stringify({ seed: seedParam(), minute, plan_team: S.follow, plan: p.custom ? p.plan : null }) });
     if (r.ok) { ASSESS.data = await r.json(); ASSESS.key = key; renderSquad(); }
   } catch { /* try again in a few seconds */ } finally { ASSESS.busy = false; }
 }
@@ -522,6 +542,80 @@ function renderSquad() {
   for (const f of sel.flags.filter((f) => f.includes(":"))) det.append(node("div", "small", `⚠ ${f}`));
 }
 
+// ---------- Your data: upload a match or connect a live source (all names inserted as text) ----------
+function addSource(value, label) {
+  const sel = $("source");
+  let opt = [...sel.options].find((o) => o.value === value);
+  if (!opt) { opt = document.createElement("option"); opt.value = value; sel.append(opt); }
+  opt.textContent = label;
+  sel.value = value;
+}
+$("up-go").onclick = async () => {
+  const f = $("up-file").files[0], status = (t) => ($("up-status").textContent = t);
+  if (!f) return status("Choose a file first.");
+  if (f.size > 8e6) return status("That file is over the 8 MB limit (one match is usually under 5 MB).");
+  $("up-go").disabled = true;
+  status("Reading and analysing your match… a full match takes up to a minute.");
+  try {
+    const r = await fetch(`${LIVE}/matches`, { method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(300000),
+      body: JSON.stringify({ text: await f.text(), format: $("up-format").value, home: $("up-home").value, away: $("up-away").value }) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+    const sc = d.summary.score;
+    status(`Done: ${d.summary.events} events over ${d.summary.minutes} minutes. ${d.summary.warnings.join(" ")}`);
+    addSource(d.seed, `Your match: ${d.teams.home.name} ${sc.home}-${sc.away} ${d.teams.away.name}`);
+    openSource(d.seed); setTab("live");
+  } catch (err) { status(`Couldn't analyse that file: ${err.message}`); } finally { $("up-go").disabled = false; }
+};
+
+const FEED = { id: null, token: null, teams: null, timer: null };
+const sample = () => fetch("data/sample-match.json").then((r) => r.json());
+$("feed-sample").onclick = async () => { $("feed-teams").value = JSON.stringify((await sample()).teams, null, 1); };
+$("feed-open").onclick = async () => {
+  const status = (t) => ($("feed-status").textContent = t);
+  let teams;
+  try { teams = JSON.parse($("feed-teams").value); } catch { return status("Line-ups must be valid JSON (try the sample)."); }
+  try {
+    const r = await fetch(`${LIVE}/feeds`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ teams }) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+    Object.assign(FEED, { id: d.id, token: d.token, teams });
+    const base = LIVE || location.origin, h = teams.home.players;
+    const example = [{ t: 12.5, team: "home", type: "pass", player: h[0]?.name, recipient: (h[1] ?? h[0])?.name, x: 40, y: 50, end_x: 55, end_y: 60, success: true }];
+    $("feed-id").textContent = d.id;
+    $("feed-curl").textContent = `curl -X POST ${base}${d.push} \\\n  -H "Authorization: Bearer ${d.token}" \\\n  -H "Content-Type: application/json" \\\n  -d '${JSON.stringify(example)}'`;
+    $("feed-info").hidden = false;
+    status("Feed open.");
+    addSource(d.seed, `Your live feed: ${d.teams.home.name} v ${d.teams.away.name}`);
+  } catch (err) { status(`Couldn't open a feed: ${err.message}`); }
+};
+$("feed-watch").onclick = () => { openSource(`feed:${FEED.id}`); $("source").value = `feed:${FEED.id}`; setTab("live"); };
+$("feed-sim").onclick = async () => {  // stands in for the user's system: streams the sample match into their feed at 20x
+  const status = (t) => ($("feed-status").textContent = t);
+  if (FEED.timer) { clearInterval(FEED.timer); FEED.timer = null; $("feed-sim").textContent = "Simulate my source"; return status("Simulation stopped."); }
+  const data = await sample();
+  if (JSON.stringify(data.teams) !== JSON.stringify(FEED.teams)) return status("The simulation needs a feed opened with the sample line-ups.");
+  let i = 0, busy = false;
+  const t0 = performance.now();
+  $("feed-sim").textContent = "Stop simulation";
+  FEED.timer = setInterval(async () => {
+    if (busy) return;
+    const upto = ((performance.now() - t0) / 1000) * 20, batch = [];
+    while (i < data.events.length && data.events[i].t <= upto && batch.length < 500) batch.push(data.events[i++]);
+    if (!batch.length) { if (i >= data.events.length) { clearInterval(FEED.timer); FEED.timer = null; status("Simulated match finished."); } return; }
+    busy = true;
+    try {
+      const r = await fetch(`${LIVE}/feeds/${FEED.id}/events`, { method: "POST", body: JSON.stringify(batch),
+        headers: { "content-type": "application/json", authorization: `Bearer ${FEED.token}` } });
+      const d = await r.json();
+      status(r.ok ? `Pushed ${i} events · match minute ${Math.floor(d.minute)}` : `Push refused: ${d.error}`);
+    } catch { status("Push failed; retrying…"); } finally { busy = false; }
+  }, 500);
+  if (S.feed !== FEED.id) $("feed-watch").click();
+};
+$("welcome-close").onclick = () => { $("welcome").hidden = true; saved.set("fl-welcome-done", 1); };
+$("help").onclick = () => $("glossary").showModal();
+
 async function liveAvailable() {
   try {
     const r = await fetch(`${LIVE}/health`, { signal: AbortSignal.timeout(2500) });
@@ -537,9 +631,11 @@ async function liveAvailable() {
   const [index, live] = await Promise.all([fetch("data/index.json").then((r) => r.json()), liveAvailable()]);
   $("squad-off").hidden = live;
   $("plan-apply").disabled = !live;
-  if (live) { loadPlan("home"); loadPlan("away"); }
-  $("source").innerHTML = (live ? `<option value="live">Live feed</option>` : "") +
-    index.map((m) => `<option value="${m.file}">Replay: match ${m.seed} (${m.home} ${m.final} ${m.away})</option>`).join("");
+  $("source").innerHTML = (live ? `<option value="live">Live demo (synthetic)</option>` : "") +
+    index.map((m) => `<option value="${esc(m.file)}">Replay: demo match ${m.seed} (${esc(m.home)} ${m.final} ${esc(m.away)})</option>`).join("");
+  for (const id of ["up-go", "feed-open"]) $(id).disabled = !live;
+  if (!live) $("up-status").textContent = "Uploading and live feeds need the live server, which is not reachable right now.";
+  if (!saved.get("fl-welcome-done")) $("welcome").hidden = false;
   const want = params.get("match");
   const pick = want ? index.find((m) => String(m.seed) === want)?.file : null;
   if (live && !pick) startLive();

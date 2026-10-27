@@ -5,9 +5,12 @@ Clubs and players are fictional. Behaviour knobs are calibrated by calibrate.py 
 results (openfootball, CC0) and published league averages; fitted values live in calib/params.json.
 A seeded storyline is baked in: Northbridge's holding midfielder is the hub, and from 60' Riverside man-mark them.
 """
+import contextvars
 import json
 import math
 import random
+from collections.abc import Mapping
+from contextlib import contextmanager
 from pathlib import Path
 
 ROLES = ["GK", "RB", "RCB", "LCB", "LB", "CDM", "RCM", "LCM", "RW", "ST", "LW"]
@@ -15,7 +18,7 @@ BASE = {
     "GK": (5, 50), "RB": (28, 85), "RCB": (20, 62), "LCB": (20, 38), "LB": (28, 15),
     "CDM": (40, 50), "RCM": (55, 68), "LCM": (55, 32), "RW": (76, 85), "ST": (86, 50), "LW": (76, 15),
 }
-TEAMS = {
+DEMO_TEAMS = {
     "home": {"name": "Northbridge FC", "players": [
         "Tomas Varga", "Eli Mensah", "Rui Calder", "Jonah Pike", "Sami Okafor", "Luca Ferrand",
         "Owen Brightwell", "Kai Andersen", "Milo Dancy", "Theo Ashgrove", "Rafa Quinlan"]},
@@ -23,6 +26,39 @@ TEAMS = {
         "Bram Holt", "Idris Cole", "Nico Strand", "Felix Moreau", "Dario Venn", "Isaac Thorne",
         "Yusuf Kaleo", "Arlo Penrose", "Callum Reyes", "Mateo Lindqvist", "Jude Harrow"]},
 }
+LINEUPS = contextvars.ContextVar("lineups", default=None)  # a user's match: {"id", "home": {...}, "away": {...}}
+
+
+class _Teams(Mapping):
+    """TEAMS for the match being analysed: the demo clubs unless a user's match is active in this context
+    (see using()). Everything reads squads through here, so analysis code is the same for demo and real data."""
+    def __getitem__(self, side):
+        return (LINEUPS.get() or DEMO_TEAMS)[side]
+
+    def __iter__(self):
+        return iter(("home", "away"))
+
+    def __len__(self):
+        return 2
+
+
+TEAMS = _Teams()
+
+
+@contextmanager
+def using(lineups):
+    """Analyse a user's match: lineups = {"id": str, "home": {"name", "players", "roles"}, "away": {...}}."""
+    token = LINEUPS.set(lineups)
+    try:
+        yield
+    finally:
+        LINEUPS.reset(token)
+
+
+def custom():
+    return LINEUPS.get() is not None
+
+
 HUB = ("home", "Luca Ferrand")  # the storyline's single point of failure
 MARK_FROM = 60 * 60            # Riverside start man-marking the hub at 60'
 HUB_PULL = 4.0                 # how much more often teammates look for the hub before marking
@@ -51,7 +87,8 @@ def params():
 
 
 def squad(team):
-    return dict(zip(TEAMS[team]["players"], ROLES))
+    t = TEAMS[team]
+    return dict(t["roles"]) if "roles" in t else dict(zip(t["players"], ROLES))
 
 
 def strengths(seed, p):

@@ -2,7 +2,9 @@
 import json
 from pathlib import Path
 
+import sources
 from feed import DEMO_SEEDS, timeline
+from match import DEMO_TEAMS, simulate, squad
 
 OUT = Path(__file__).parent / "web" / "data"
 
@@ -17,3 +19,8 @@ if __name__ == "__main__":
                           away=tl["meta"]["teams"]["away"]["name"], final=f"{last['home']}-{last['away']}"))
         print("wrote", seed)
     (OUT / "index.json").write_text(json.dumps(index, indent=1))
+    # Templates for "bring your own match": one synthetic match in each supported format
+    ev, teams = list(simulate(7)), {s: {"name": DEMO_TEAMS[s]["name"], "roles": squad(s)} for s in ("home", "away")}
+    (OUT / "sample-match.json").write_text(json.dumps(sources.to_native(ev, teams), separators=(",", ":")))
+    (OUT / "sample-match.csv").write_text(sources.to_csv(ev, teams))
+    print("wrote samples")

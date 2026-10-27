@@ -135,3 +135,18 @@ textarea { font: inherit; color: inherit; width: 100%; background: var(--panel-2
 .fit i { display: block; height: 8px; border-radius: 4px; background: var(--muted); }
 .squad-detail { margin-top: 10px; font-size: 13px; line-height: 1.5; }
 .squad-detail ul { margin: 4px 0; padding-left: 18px; }
+.help { background: var(--panel-2); border: 1px solid var(--line); border-radius: 50%; width: 26px; height: 26px; cursor: pointer; font-weight: 800; }
+.welcome { display: flex; gap: 16px; align-items: flex-start; justify-content: space-between; margin: 12px 16px 0; padding: 12px 16px;
+  background: var(--panel); border: 1px solid var(--accent); border-radius: 10px; font-size: 13px; line-height: 1.5; }
+.welcome ol { margin: 6px 0 0; padding-left: 20px; }
+.welcome button, dialog button { background: var(--accent); color: #111; border: 0; border-radius: 8px; padding: 6px 14px; font-weight: 800; cursor: pointer; white-space: nowrap; }
+.form { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; margin: 8px 0; }
+.form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.form input, .form select { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; min-width: 0; }
+.analysis h3 { margin: 4px 0 6px; font-size: 15px; }
+.code { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-size: 11px; white-space: pre-wrap; word-break: break-all; }
+.schema { margin-top: 12px; font-size: 13px; } .schema summary { cursor: pointer; color: var(--accent); }
+dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 12px; max-width: min(560px, calc(100% - 32px)); padding: 16px 20px; }
+dialog::backdrop { background: rgba(0, 0, 0, .6); }
+dialog dt { font-weight: 700; margin-top: 8px; } dialog dd { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+@media (max-width: 700px) { .welcome { flex-direction: column; } }

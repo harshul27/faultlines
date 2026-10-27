@@ -39,9 +39,9 @@ proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "server:app", "--port"
 base = f"http://127.0.0.1:{port}"
 
 
-def read(headers=None, want=8, timeout=30):
+def read(headers=None, want=8, timeout=30, path="/live"):
     msgs, cur, deadline = [], {}, time.time() + timeout
-    with httpx.stream("GET", f"{base}/live", headers=headers or {}, timeout=timeout) as r:
+    with httpx.stream("GET", f"{base}{path}", headers=headers or {}, timeout=timeout) as r:
         assert r.headers["content-type"].startswith("text/event-stream")
         for line in r.iter_lines():
             if line.startswith(("id:", "event:", "data:")):
@@ -94,6 +94,29 @@ try:
     assert len(sq["players"]) == 11 and sq["execution"]["principles"] and sq["zones"], "squad vs plan"
     assert httpx.post(f"{base}/assess", json={"seed": 23, "minute": 70, "plan": "x" * 10}, timeout=10).status_code == 400
     assert httpx.post(f"{base}/plan", json={"text": "short", "team": "home"}, timeout=10).status_code == 400
+    # Bring your own match: upload (CSV), analyse it like a demo match, reject unsafe names
+    up = httpx.post(f"{base}/matches", json={"text": (ROOT / "web/data/sample-match.csv").read_text(), "format": "csv",
+                                             "home": "Test United", "away": "Sample City"}, timeout=300).json()
+    assert up["summary"]["events"] > 500 and up["teams"]["home"]["name"] == "Test United", up
+    tl = httpx.get(f"{base}/matches/{up['id']}", timeout=30).json()
+    assert len(tl["snapshots"]) >= 90 and tl["meta"]["seed"] == up["seed"], "an upload becomes a full replay timeline"
+    sq = httpx.post(f"{base}/assess", json={"seed": up["seed"], "minute": 70, "plan_team": "home"}, timeout=60).json()
+    assert len(sq["players"]) == 11 and sq["execution"]["principles"], "uploads get the same analysis"
+    ex = httpx.get(f"{base}/explain", params={"seed": up["seed"], "minute": 70, "team": "away"}, timeout=30).json()
+    assert "Sample City" in ex["text"] or ex["text"], "explanations use the uploaded names"
+    bad = httpx.post(f"{base}/matches", json={"text": "t,team,type,player,player_role\n1,home,pass,<img src=x>,ST", "format": "csv"}, timeout=10)
+    assert bad.status_code == 422 and "valid name" in bad.json()["error"], "markup in names is rejected"
+    # Live push feed from the user's own source: token required, time order enforced, viewers get SSE
+    native = json.loads((ROOT / "web/data/sample-match.json").read_text())
+    feed = httpx.post(f"{base}/feeds", json={"teams": native["teams"]}, timeout=10).json()
+    evs, auth = native["events"][:150], {"authorization": f"Bearer {feed['token']}"}
+    assert httpx.post(f"{base}{feed['push']}", json=evs, timeout=10).status_code == 401, "pushing needs the token"
+    pushed = httpx.post(f"{base}{feed['push']}", json=evs, headers=auth, timeout=120).json()
+    assert pushed["accepted"] == 150, pushed
+    assert httpx.post(f"{base}{feed['push']}", json=evs[:1], headers=auth, timeout=10).status_code == 422, "time order"
+    hello = json.loads(read(want=1, path=feed["watch"])[0]["data"])
+    assert len(hello["events"]) == 150 and hello["meta"]["seed"] == feed["seed"], "viewers join the user's feed"
+    assert httpx.get(f"{base}/live", params={"feed": "nope"}, timeout=5).status_code == 404
 finally:
     proc.terminate()
 print("ok")

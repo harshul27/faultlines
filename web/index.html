@@ -15,9 +15,21 @@
     <nav class="tabs" role="tablist">
       <button role="tab" id="tab-live" aria-selected="true" aria-controls="panel-live">Live</button>
       <button role="tab" id="tab-analysis" aria-selected="false" aria-controls="panel-analysis">Deep analysis</button>
+      <button role="tab" id="tab-data" aria-selected="false" aria-controls="panel-data">Your data</button>
     </nav>
-    <div class="status"><span id="badge" class="badge">Connecting…</span><span id="latency" class="muted"></span></div>
+    <div class="status"><span id="badge" class="badge">Connecting…</span><span id="latency" class="muted"></span>
+      <button id="help" class="help" type="button" aria-label="What the terms mean">?</button></div>
   </header>
+
+  <section id="welcome" class="welcome" hidden aria-label="Getting started">
+    <div><b>Welcome to Fault Lines</b>: see which player a team's passing depends on, as the match happens.
+      <ol>
+        <li><b>Live</b>: watch a synthetic match. The ringed player is the fault line; alerts appear as play changes.</li>
+        <li><b>Deep analysis</b>: paste your game plan, see every player judged against it, and ask the analyst ("Who should I take off?").</li>
+        <li><b>Your data</b>: upload your own match (CSV, JSON or StatsBomb) or connect a live source.</li>
+      </ol></div>
+    <button id="welcome-close" type="button">Got it</button>
+  </section>
 
   <section class="controls" aria-label="View settings">
     <label>Source <select id="source"></select></label>
@@ -152,7 +164,71 @@
         </div>
       </div>
     </section>
+    <section id="panel-data" role="tabpanel" aria-labelledby="tab-data" class="analysis" hidden>
+      <div class="card wide">
+        <div class="label">Your data <span class="muted">(the demo runs on synthetic matches; what you upload stays in the server's memory only, newest 20, and is never written to disk)</span></div>
+        <div class="grid2">
+          <div>
+            <h3>Upload a match</h3>
+            <p class="muted small">Fault Lines CSV or JSON, or a StatsBomb events file. Start from a sample:
+              <a href="data/sample-match.csv" download>sample CSV</a> · <a href="data/sample-match.json" download>sample JSON</a></p>
+            <div class="form">
+              <label>File <input id="up-file" type="file" accept=".json,.csv,text/csv,application/json"></label>
+              <label>Format <select id="up-format"><option value="auto">Detect automatically</option><option value="csv">Fault Lines CSV</option>
+                <option value="native">Fault Lines JSON</option><option value="statsbomb">StatsBomb events JSON</option></select></label>
+              <label>Home team <input id="up-home" maxlength="60" placeholder="CSV files only"></label>
+              <label>Away team <input id="up-away" maxlength="60" placeholder="CSV files only"></label>
+            </div>
+            <div class="plan-bar"><button id="up-go" class="primary" type="button">Analyse my match</button></div>
+            <p id="up-status" class="small" aria-live="polite"></p>
+          </div>
+          <div>
+            <h3>Connect a live source</h3>
+            <p class="muted small">Open a feed, then push events from your own system as they happen (HTTP POST with a secret token). Everyone watching the feed sees the same live analysis.</p>
+            <textarea id="feed-teams" rows="4" aria-label="Line-ups as JSON" placeholder='{"home": {"name": "Your club", "players": [{"name": "A Player", "role": "CDM"}, ...]}, "away": {...}}'></textarea>
+            <div class="plan-bar"><button id="feed-sample" type="button">Use sample line-ups</button>
+              <button id="feed-open" class="primary" type="button">Open feed</button><span id="feed-status" class="muted small" aria-live="polite"></span></div>
+            <div id="feed-info" hidden>
+              <p class="small">Feed <code id="feed-id"></code> is open. Push events like this:</p>
+              <pre id="feed-curl" class="code"></pre>
+              <div class="plan-bar"><button id="feed-watch" class="primary" type="button">Watch this feed</button>
+                <button id="feed-sim" type="button">Simulate my source</button></div>
+              <p class="muted small">Keep the token private: anyone with it can push to your feed. Feeds close after 3 idle hours.</p>
+            </div>
+          </div>
+        </div>
+        <details class="schema"><summary>Data format</summary>
+          <p class="small">One row (CSV) or object (JSON) per on-ball event, in time order. Coordinates are 0-100 in the acting team's attacking direction: x = 0 its own goal line, y = 0 its left touchline.</p>
+          <table class="squad"><thead><tr><th>Field</th><th>Meaning</th></tr></thead><tbody>
+            <tr><td>t</td><td>seconds since kick-off</td></tr>
+            <tr><td>team</td><td>home or away</td></tr>
+            <tr><td>type</td><td>pass, shot or own_goal</td></tr>
+            <tr><td>player, player_role</td><td>who acted, and their role: GK, RB, RCB, LCB, LB, CDM, RCM, LCM, RW, ST, LW (CSV: once per player is enough)</td></tr>
+            <tr><td>recipient, recipient_role</td><td>who received a completed pass</td></tr>
+            <tr><td>x, y, end_x, end_y</td><td>where the pass or shot started and ended</td></tr>
+            <tr><td>success, pressure</td><td>pass completed; under pressure (true/false)</td></tr>
+            <tr><td>xg, goal</td><td>shots: expected goals from your provider (estimated from distance if missing) and whether it went in</td></tr>
+          </tbody></table>
+          <p class="small muted">StatsBomb files are converted automatically (first team in the file = home). JSON line-ups for a live feed: <code>{"home": {"name", "players": [{"name", "role"}]}, "away": {...}}</code>.</p>
+        </details>
+      </div>
+    </section>
   </main>
+  <dialog id="glossary" aria-labelledby="glossary-title">
+    <h3 id="glossary-title">What the terms mean</h3>
+    <dl>
+      <dt>Fault line</dt><dd>The player whose absence would cost teammates the most passing connections over the last 15 minutes.</dd>
+      <dt>Network dependence</dt><dd>That cost as a percentage. It shows how much play depends on someone now, not certain damage: teams can re-route the ball.</dd>
+      <dt>Passing spread</dt><dd>How evenly the ball is shared. Lower means play runs through fewer links.</dd>
+      <dt>Progressive pass</dt><dd>A completed pass that moves the ball at least about 10 m towards goal.</dd>
+      <dt>Plan fit</dt><dd>0-100: how a player is doing on what your game plan asks of their position. 50 = normal for the position.</dd>
+      <dt>Load vs plan</dt><dd>A player's share of the team's actions against what their position and your plan imply. Overloaded = the team leans on them more than intended.</dd>
+      <dt>Expected points added</dt><dd>Chances created or taken, weighted by how many points a goal was worth at that moment.</dd>
+      <dt>Cues</dt><dd>Broadcast-style alerts when something unusual for the league happens.</dd>
+    </dl>
+    <p class="small muted">How far to trust each number: <a href="https://github.com/harshul27/faultlines/blob/main/reports/evaluation.md" target="_blank" rel="noopener">the evaluation</a>.</p>
+    <form method="dialog"><button>Close</button></form>
+  </dialog>
   <footer class="muted small">Synthetic match data; fictional clubs and players. Calibrated on public-domain Premier League results.
     <a href="https://github.com/harshul27/faultlines">Source &amp; methodology</a></footer>
 </body>

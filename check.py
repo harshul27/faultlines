@@ -149,3 +149,32 @@ assert pick["recommended_substitution"] == agents._gather_substitution("home", [
 agents.CTX.get()["outputs"].clear()
 assert agents._gather_matchups("home", ["Callum Reyes"])[0]["faced_by"] == ["Sami Okafor (LB)"], "who faces an opponent is a fact"
 print("validation fixes ok")
+
+# Bring your own match: adapters round-trip, StatsBomb shape, isolation from the demo
+import sources
+from match import DEMO_TEAMS, using
+
+demo_teams = {s: {"name": DEMO_TEAMS[s]["name"], "roles": gp.squad(s)} for s in ("home", "away")}
+lu, evs, summ = sources.parse(sources.to_csv(ev, demo_teams), "csv", "Test United", "Sample City")
+with using(lu):
+    assert TEAMS["home"]["name"] == "Test United" and team_view(evs, "home", 60)["spof"]["name"] == HUB[1], "CSV round trip keeps the analysis"
+assert TEAMS["home"]["name"] == DEMO_TEAMS["home"]["name"], "a user's match never leaks into the demo"
+assert sources.parse(json.dumps(sources.to_native(evs, lu)))[2]["events"] == summ["events"], "native JSON round trip"
+sb = [{"type": {"name": "Starting XI"}, "team": {"name": "Alpha"}, "tactics": {"lineup": [
+          {"player": {"name": "A One"}, "position": {"name": "Goalkeeper"}}, {"player": {"name": "A Two"}, "position": {"name": "Center Forward"}}]}},
+      {"type": {"name": "Starting XI"}, "team": {"name": "Beta"}, "tactics": {"lineup": [
+          {"player": {"name": "B One"}, "position": {"name": "Goalkeeper"}}]}},
+      {"type": {"name": "Pass"}, "team": {"name": "Alpha"}, "player": {"name": "A One"}, "minute": 0, "second": 5, "period": 1,
+       "location": [12, 40], "pass": {"end_location": [60, 20], "recipient": {"name": "A Two"}}},
+      {"type": {"name": "Shot"}, "team": {"name": "Alpha"}, "player": {"name": "A Two"}, "minute": 0, "second": 9, "period": 1,
+       "location": [108, 40], "shot": {"statsbomb_xg": 0.31, "outcome": {"name": "Goal"}}}]
+sl, se, ss = sources.parse(json.dumps(sb))
+assert sl["home"]["roles"] == {"A One": "GK", "A Two": "ST"} and se[0]["x"] == 10.0 and se[0]["end_y"] == 25.0, "StatsBomb mapping"
+assert ss["score"] == {"home": 1, "away": 0} and se[1]["xg"] == 0.31, "provider xG and goals kept"
+for bad_input in ('{"teams": {}, "events": []}', "t,team\n1,home", "[1, 2]", '{"teams": {"home": {"name": "<b>", "players": [{"name": "x", "role": "GK"}]}}, "events": [{}]}'):
+    try:
+        sources.parse(bad_input)
+        raise AssertionError(f"accepted bad input {bad_input[:30]}")
+    except sources.DataError:
+        pass
+print("bring your own data ok")

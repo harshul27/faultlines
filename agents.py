@@ -23,8 +23,8 @@ import numpy as np
 import ai
 import gameplan
 import grounding
-from match import TEAMS, params, simulate, squad, strengths
-from network import fragility, pass_graph, score_at, team_view
+from match import LINEUPS, TEAMS, params, simulate, squad, strengths
+from network import GOALS, fragility, pass_graph, score_at, team_view
 
 CTX = contextvars.ContextVar("ctx")  # per-request match context + trace
 INTENTS = ("match_summary", "player", "assessment", "tactics", "substitution", "what_if", "prediction", "trend", "off_topic")
@@ -142,8 +142,10 @@ def win_probability() -> dict:
     goal rate estimated by re-simulating this fixture. Returns home win / draw / away win and likely scores."""
     t0, c = time.perf_counter(), CTX.get()
     m, sc = c["minute"], score_at(c["events"], c["minute"] * 60)
-    rate = _goal_rates(c["seed"]) * max(0.0, 95 - m) / 95
-    rng = np.random.default_rng(c["seed"] * 1000 + int(m))
+    # Demo: goal rates from re-simulating these two clubs. A user's match: Premier League average rates by side.
+    base = _goal_rates(c["seed"]) if isinstance(c["seed"], int) else np.array([GOALS["home"], GOALS["away"]])
+    rate = base * max(0.0, 95 - m) / 95
+    rng = np.random.default_rng((c["seed"] if isinstance(c["seed"], int) else 0) * 1000 + int(m))
     h = sc["home"] + rng.poisson(rate[0], 10_000)
     a = sc["away"] + rng.poisson(rate[1], 10_000)
     finals = {}
@@ -306,13 +308,14 @@ def _route(question, memory):
     """Hedged request: Phi-4-mini first; if it is slow, gpt-4.1-mini races it; first valid answer wins (and is cached)."""
     from concurrent.futures import FIRST_COMPLETED, wait
     t0 = time.perf_counter()
-    key = (" ".join(question.lower().split()), memory)
+    key = (" ".join(question.lower().split()), memory, (LINEUPS.get() or {}).get("id"))
     if key in _routes:
         route, who = _routes[key]
         CTX.get()["trace"].append({"agent": f"Router (cached: {who})", "detail": f"{route}", "ms": 0})
         return dict(route), f"cached: {who}"
     prompt = ROUTER_PROMPT.replace("QUESTION_HERE", (f"Earlier: {memory}\n" if memory else "") + f"Question: {question}")
-    pending = {_pool.submit(_classify, "router", prompt): "Phi-4-mini"}
+    submit = lambda *a: _pool.submit(contextvars.copy_context().run, *a)  # worker threads see this match's squads
+    pending = {submit(_classify, "router", prompt): "Phi-4-mini"}
     route, who, hedged = None, None, False
     while pending and time.perf_counter() - t0 < ROUTE_BUDGET:
         wait_for = HEDGE_AFTER if not hedged else ROUTE_BUDGET - (time.perf_counter() - t0)
@@ -324,7 +327,7 @@ def _route(question, memory):
         if route:
             break
         if not hedged:  # slow or failed: hedge with the bigger model
-            pending[_pool.submit(_classify, "chat", prompt)] = "gpt-4.1-mini (hedge)"
+            pending[submit(_classify, "chat", prompt)] = "gpt-4.1-mini (hedge)"
             hedged = True
     if route is None:
         route, who = _rules(question), "keyword rules (models too slow)"

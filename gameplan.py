@@ -16,7 +16,7 @@ from functools import lru_cache
 
 import numpy as np
 
-from match import M_X, M_Y, TEAMS, simulate, squad
+from match import M_X, M_Y, TEAMS, custom, simulate, squad
 from network import fragility, pass_graph
 
 METRICS = {
@@ -63,7 +63,7 @@ def raw_metrics(events, team, lo, hi):
     for i, e in enumerate(events):
         if e["t"] >= hi:
             break
-        if e["t"] >= lo and e["team"] == team:
+        if e["t"] >= lo and e["team"] == team and e["type"] in ("pass", "shot"):  # own goals count only in the score
             r = m[e["player"]]
             if e["type"] == "shot":
                 r["shots"] += 1
@@ -250,7 +250,7 @@ def zones(events, team, minute, window=None):
     for e in events:
         if e["t"] >= hi:
             break
-        if e["t"] >= lo and e["team"] == team:
+        if e["t"] >= lo and e["team"] == team and e["type"] in ("pass", "shot"):  # own goals count only in the score
             if e["type"] == "shot":
                 shots[lane(e["y"])] += 1
             elif not e["success"]:
@@ -453,5 +453,14 @@ def _default(team):
     return json.dumps(normalise(parse_rules(DEFAULT_PLANS[team], team), team))
 
 
+GENERIC_PLAN = ("Control the game through patient possession and short passing. The holding midfielder dictates the "
+                "tempo and connects the back line to the attack. Centre-backs play out under pressure. Full-backs "
+                "overlap and deliver into the box. Wingers create chances and counter-press. The striker gets shots "
+                "away in the box.")
+
+
 def default_plan(team):
+    """The demo clubs' plans; for a user's match, a generic plan (they can paste their own)."""
+    if custom():
+        return normalise(parse_rules(GENERIC_PLAN, team), team)
     return json.loads(_default(team))  # a fresh copy, so callers can't mutate the cache

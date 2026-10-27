@@ -9,6 +9,9 @@ traceable to the data.
 
 **Live demo:** https://harshul27.github.io/faultlines/ (mirror: https://faultlines-seven.vercel.app)
 
+**Watch:** [demo video (1:44)](pitch/demo-video.mp4) · **Deck:** [PDF](pitch/fault-lines-pitch.pdf) ·
+[PowerPoint, with speaker notes](pitch/fault-lines-pitch.pptx) · [animated HTML](pitch/deck/deck.html)
+
 The demo runs on synthetic, football-realistic matches between two fictional clubs. You can also upload your own
 match file or stream your own live events into it.
 
@@ -192,6 +195,7 @@ web/            the page (HTML, CSS, JavaScript) and its replay data
 tests/          capability tests, live stream and API tests, the evaluation
 calibration/    fits the generator on real results (public domain) and validates it on later seasons
 reports/        evaluation and validation reports (earlier runs in reports/history/)
+pitch/          demo video and the deck (PDF, PowerPoint, animated HTML with its storyline in deck/SCRIPT.md)
 ```
 
 ## Roadmap

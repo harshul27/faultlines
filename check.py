@@ -212,3 +212,19 @@ names = set(zipfile.ZipFile(io.BytesIO(pkg)).namelist())
 assert {"clean_events.csv", "clean_events.json", "quarantine.csv", "quality_report.json", "quality_report.md", "manifest.json",
         "DATA_DICTIONARY.md"} <= names, "the package gives the user everything back"
 print("bring your own data ok")
+
+# Any formation: a back three, wing-backs, two strikers and no wingers must not break the agents or the plan
+three = sources.lineup({"home": {"name": "Back Three", "players": [{"name": n, "role": r} for n, r in [
+    ("Ann Keeper", "GK"), ("Ben One", "CB"), ("Cal Two", "CB"), ("Dan Three", "CB"), ("Eve Wing", "RWB"), ("Fay Wing", "LWB"),
+    ("Gus Mid", "CDM"), ("Hal Mid", "CM"), ("Ivy Mid", "CM"), ("Jo Strike", "ST"), ("Kit Strike", "ST")]]},
+    "away": {"name": "Flat Four", "players": [{"name": p, "role": r} for p, r in zip(DEMO_TEAMS["away"]["players"], agents.squad("away").values())]}})
+with using(three):
+    m = agents.matchups("home")
+    assert all(n in m for n in ("Ben One", "Cal Two", "Dan Three", "Fay Wing")), "every centre-back and the wing-back face someone"
+    agents.matchups("away")
+    plan = gp.normalise({"duties": [{"target": "ST", "duty": "score", "metrics": {"xg": 3}}]}, "home")
+    assert {"Jo Strike", "Kit Strike"} <= set(plan["duties"]), "a role code reaches every player in that role"
+    assert {"Ben One", "Cal Two", "Dan Three"} <= set(gp.default_plan("home")["duties"]), "all three centre-backs get the duty"
+assert agents._as_list("Luca Ferrand") == ["Luca Ferrand"] and agents._as_list(None) == [], "router players as a string"
+assert agents._find_player("an") == (None, None), "a two-letter fragment is not a player"
+print("any formation ok")

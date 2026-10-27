@@ -457,7 +457,7 @@ def run(raw_rows, teams=None, *, fmt="csv", home=None, away=None, scale="auto", 
             if direction == "auto":
                 shots = [r["x"] for r in mine if r["kind"] == "shot" and r["x"] is not None]
                 keeper = [r["x"] for r in mine if (r.get("player_role") == "GK" or r["player"] in keepers[side]) and r["x"] is not None]
-                votes = [float(np.median(shots)) < 50] * min(3, len(shots)) + [float(np.mean(keeper)) > 50] * (2 if len(keeper) >= 3 else 0)
+                votes = ([float(np.median(shots)) < 50] * min(3, len(shots)) if shots else []) +                         ([float(np.mean(keeper)) > 50] * 2 if len(keeper) >= 3 else [])
                 if not votes:
                     frame_conf = "low"
                     log.notes.append(f"{side}, period {period}: no shots or keeper actions to confirm the attack direction; assumed already in the team's frame")

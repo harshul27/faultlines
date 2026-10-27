@@ -230,7 +230,9 @@ def execution(events, team, minute, plan):
     for text, metrics, ps in items:
         pr = {"text": text, "metrics": metrics}
         per = {p: sum(v * zs[p][k][0] for k, v in pr["metrics"].items()) / sum(pr["metrics"].values()) for p in ps}
-        score = round(max(1, min(99, 50 + 15 * float(np.mean(list(per.values())))))) if per else 50
+        if not per:  # an instruction for a position this team does not field
+            continue
+        score = round(max(1, min(99, 50 + 15 * float(np.mean(list(per.values()))))))
         best, worst = max(per, key=per.get), min(per, key=per.get)
         out.append({"principle": pr["text"], "score": score,
                     "status": "working" if score >= 58 else "not working" if score <= 42 else "mixed",
@@ -360,7 +362,9 @@ def normalise(raw, team):
     """Validate a plan from the model, the rules or the browser: known metrics only (weights 0-3), relevance 1-5,
     targets resolved to this team's players or roles. Unknown things are dropped, not trusted."""
     roles = squad(team)
-    by_role = {r: p for p, r in roles.items()}
+    by_role = {}
+    for p, r in roles.items():
+        by_role.setdefault(r, []).append(p)
 
     def mets(d):
         return {k: round(max(0.0, min(3.0, float(v))), 1) for k, v in (d or {}).items()
@@ -369,9 +373,9 @@ def normalise(raw, team):
     def resolve(target):
         t = str(target or "").strip()
         if t.upper() in by_role:
-            return [by_role[t.upper()]]
+            return by_role[t.upper()]
         if t.upper() in GROUPS:
-            return [by_role[r] for r in GROUPS[t.upper()]]
+            return [p for r in GROUPS[t.upper()] for p in by_role.get(r, [])]
         return [p for p in roles if t.lower() in (p.lower(), p.split()[-1].lower())][:1]
 
     principles = []

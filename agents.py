@@ -43,9 +43,13 @@ def _find_player(name):
     name = (name or "").strip().lower()
     for t in TEAMS:
         for p in TEAMS[t]["players"]:
-            if name and (name == p.lower() or name == p.split()[-1].lower() or name in p.lower()):
+            if name and (name == p.lower() or name == p.split()[-1].lower() or (len(name) >= 3 and name in p.lower())):
                 return t, p
     return None, None
+
+
+def _as_list(v):
+    return [v] if isinstance(v, str) else [x for x in v if isinstance(x, str)] if isinstance(v, list) else []
 
 
 def _record(tool, args, out, t0):
@@ -166,7 +170,8 @@ def compare_windows(team: str, earlier_minute: int, later_minute: int) -> dict:
     passing spread, progressive passes and pass completion, with the direction of each change."""
     t0, c = time.perf_counter(), CTX.get()
     side = _side(team)
-    a, b = (max(15, min(int(earlier_minute), c["minute"])), max(15, min(int(later_minute), c["minute"])))
+    lo = min(15, c["minute"])  # a full window when there is one; never a minute that has not been played
+    a, b = (max(lo, min(int(earlier_minute), c["minute"])), max(lo, min(int(later_minute), c["minute"])))
     va, vb = team_view(c["events"], side, a), team_view(c["events"], side, b)
     out = {"team": TEAMS[side]["name"], "earlier": f"{a}'", "later": f"{b}'",
            "fault_line": f"{va['spof']['name']} {pct(va['spof']['fragility'])} -> {vb['spof']['name']} {pct(vb['spof']['fragility'])}",
@@ -284,7 +289,7 @@ def _classify(model, prompt):
     d = json.loads(re.search(r"\{.*?\}", r.choices[0].message.content, re.S).group(0))  # small models add prose
     return {"intent": d.get("intent") if d.get("intent") in INTENTS else "match_summary",
             "team": d.get("team") if d.get("team") in ("home", "away") else None,
-            "players": [p for p in (_find_player(x)[1] for x in d.get("players") or []) if p],
+            "players": [p for p in (_find_player(x)[1] for x in _as_list(d.get("players"))) if p],
             "confidence": float(d.get("confidence", 0.5))}
 
 
@@ -409,9 +414,14 @@ FACES = {"RW": ["LB"], "LW": ["RB"], "RB": ["LW"], "LB": ["RW"], "RCM": ["LCM"],
 def matchups(plan_team):
     """Direct opponents as facts, so the analyst never has to mirror flanks itself."""
     other = "away" if plan_team == "home" else "home"
-    ours = {r: p for p, r in squad(plan_team).items()}
+    pairs = [(p, r, _facing(plan_team, r)) for p, r in squad(other).items()]
     return "Direct opponents (their right side meets our left side): " + "; ".join(
-        f"their {p} ({r}) vs our {' and '.join(f'{ours[x]} ({x})' for x in FACES[r])}" for p, r in squad(other).items() if r in FACES)
+        f"their {p} ({r}) vs our {' and '.join(f'{q} ({x})' for q, x in faced)}" for p, r, faced in pairs if faced)
+
+
+def _facing(plan_team, role):
+    """Our players who meet an opponent in this role, in any formation (no left-back, two strikers, a back three)."""
+    return [(p, r) for x in FACES.get(role, []) for p, r in squad(plan_team).items() if r == x]
 
 
 SUB_VERB = re.compile(r"\b(take|taking|bring|bringing|sub|subbing|substitut\w*|replac\w*|withdraw\w*|hook\w*)\b", re.I)
@@ -466,10 +476,9 @@ def _gather_substitution(plan_team, named):
 def _gather_matchups(plan_team, opponents):
     """For each named opponent: our player(s) facing them (mirrored positions) and their assessment."""
     other = "away" if plan_team == "home" else "home"
-    ours = {r: p for p, r in squad(plan_team).items()}
-    facts = [{"their_player": p, "their_role": r, "faced_by": [f"{ours[x]} ({x})" for x in FACES[r]]}
-             for p, r in squad(other).items() if p in opponents and r in FACES]
-    assessed = [assess_player(ours[x]) for p, r in squad(other).items() if p in opponents and r in FACES for x in FACES[r]]
+    named = [(p, r, _facing(plan_team, r)) for p, r in squad(other).items() if p in opponents]
+    facts = [{"their_player": p, "their_role": r, "faced_by": [f"{q} ({x})" for q, x in faced]} for p, r, faced in named if faced]
+    assessed = [assess_player(q) for q in dict.fromkeys(q for _, _, faced in named for q, _ in faced)]
     _by("Orchestrator", len(assessed))
     CTX.get()["outputs"].extend(facts)
     return facts + assessed

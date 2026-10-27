@@ -7,3 +7,4 @@ openai>=2.0
 azure-identity>=1.19
 agent-framework-core==1.23.0
 agent-framework-openai==1.17.0
+mcp==2.3.0

@@ -24,7 +24,7 @@ Every requirement from the challenge brief and the official rules, where it is m
 | Criterion | Evidence | Gap / next step |
 |---|---|---|
 | Technological implementation | 81/19 train/test split by time (4,940 / 1,190 real matches), regularisation tuned inside training years, 17/17 held-out checks, requirement and web/SSE tests in CI on every push | — |
-| Agentic design & innovation | Multi-agent "Ask the analyst" on Microsoft Agent Framework: Phi-4-mini router (gated, hedged), embedding-salience memory, tool-using analyst (what-if counterfactual, Monte Carlo win probability, game-plan assessment: every player rated on the metrics the coach's plan weights, load vs plan, substitutions, zones), deterministic verifier with one self-correcting rewrite, number-preserving translator, coaching guard; full trace shown to viewers | `evaluate.py --ai`: tools, guard, fallbacks, consistency, model-judged quality on 26 coach questions; plan reader on 18 hard cases ([reports/evaluation.md](reports/evaluation.md)) |
+| Agentic design & innovation | Multi-agent "Ask the analyst" on Microsoft Agent Framework: Phi-4-mini router (gated, hedged), embedding-salience memory, tool-using analyst (what-if counterfactual, Monte Carlo win probability, game-plan assessment: every player rated on the metrics the coach's plan weights, load vs plan, substitutions, zones), deterministic verifier with one self-correcting rewrite, number-preserving translator, coaching guard; full trace shown to viewers; the match tools are also an **MCP server** (`/mcp`) usable from GitHub Copilot Agent Mode or any agent | `evaluate.py --ai`: tools, guard, fallbacks, consistency, model-judged quality on 26 coach questions; plan reader on 18 hard cases ([reports/evaluation.md](reports/evaluation.md)) |
 | Real-world impact & applicability | Broadcast-ready cue schema; latency budget; fragility is a scouting/tactics metric clubs could use on real data | See roadmap in README |
 | User experience & presentation | Public web page (live + deep analysis, mobile-friendly) and Streamlit app | Record the < 2 min demo |
 | Adherence to category | All five pipeline stages covered (table above) | — |
@@ -35,7 +35,7 @@ Every requirement from the challenge brief and the official rules, where it is m
 |---|---|
 | Public GitHub repo | ✅ https://github.com/harshul27/faultlines |
 | Demo video < 2 min on YouTube/Vimeo, no third-party trademarks or copyrighted music | ⏳ fictional clubs used; no PL marks in the app |
-| Pitch naming the Microsoft/Azure technologies used | ⏳ write it: Microsoft Foundry (gpt-4.1-mini, Phi-4-mini-instruct, text-embedding-3-small), Microsoft Agent Framework, Azure Container Apps, Azure Container Registry, managed identity / Entra ID, GitHub Actions, GitHub Pages |
+| Pitch naming the Microsoft/Azure technologies used | ⏳ write it: Microsoft Foundry (gpt-4.1-mini, Phi-4-mini-instruct, text-embedding-3-small), Microsoft Agent Framework, Model Context Protocol (MCP server for GitHub Copilot Agent Mode), Azure Container Apps, Azure Container Registry, managed identity / Entra ID, GitHub Actions, GitHub Pages |
 | Third-party data used within its license (§4.3) | ✅ openfootball is CC0; published figures are facts with sources in `targets.json` |
-| Working demo available to judges through the judging period (§4.8) | ⏳ deploy to Azure Container Apps |
+| Working demo available to judges through the judging period (§4.8) | ✅ https://harshul27.github.io/faultlines/ (backend on Azure Container Apps) |
 | Deadline: 27 Oct 2026, 11:59 pm PT | ⏳ |

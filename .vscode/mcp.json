@@ -1,0 +1,8 @@
+{
+  "servers": {
+    "faultlines": {
+      "type": "http",
+      "url": "https://faultlines-live2.salmoncoast-eea88059.eastus2.azurecontainerapps.io/mcp"
+    }
+  }
+}

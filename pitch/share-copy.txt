@@ -1,1 +1,0 @@
-Every team has one player it can't afford to lose. Fault Lines finds them live, explains what breaks without them, and lets a coach ask "what if?" mid-match. Every number is checked against the data. Built on Microsoft Foundry, the Agent Framework and Azure Container Apps. Try it: harshul27.github.io/faultlines

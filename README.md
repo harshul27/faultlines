@@ -7,9 +7,10 @@ would cut the team's passing connectivity the most. It explains why that matters
 player against the coach's own game plan, and answers a coach's questions during the match, with every number
 traceable to the data.
 
-**Live demo:** https://harshul27.github.io/faultlines/ (mirror: https://faultlines-seven.vercel.app)
+[![Watch the 1:44 demo on YouTube](https://img.youtube.com/vi/ye_NXRQLRho/maxresdefault.jpg)](https://youtu.be/ye_NXRQLRho)
 
-**Watch:** [demo video (1:44)](pitch/demo-video.mp4) · **Deck:** [PDF](pitch/fault-lines-pitch.pdf) ·
+**▶ [Watch the demo (1:44)](https://youtu.be/ye_NXRQLRho)** · **[Try it live](https://harshul27.github.io/faultlines/)**
+(mirror: [faultlines-seven.vercel.app](https://faultlines-seven.vercel.app)) · **Deck:** [PDF](pitch/fault-lines-pitch.pdf) ·
 [PowerPoint, with speaker notes](pitch/fault-lines-pitch.pptx)
 
 The demo runs on synthetic, football-realistic matches between two fictional clubs. You can also upload your own
@@ -195,7 +196,7 @@ web/            the page (HTML, CSS, JavaScript) and its replay data
 tests/          capability tests, live stream and API tests, the evaluation
 calibration/    fits the generator on real results (public domain) and validates it on later seasons
 reports/        evaluation and validation reports (earlier runs in reports/history/)
-pitch/          demo video and the deck (PDF, PowerPoint)
+pitch/          the demo video (also on YouTube) and the deck (PDF, PowerPoint)
 ```
 
 ## Roadmap
